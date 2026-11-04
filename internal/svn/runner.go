@@ -45,6 +45,12 @@ func (r *ExecRunner) SetCredentials(username, password string) {
 	r.username, r.password = username, password
 }
 
+func (r *ExecRunner) Credentials() (username, password string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.username, r.password
+}
+
 func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...string) ([]byte, error) {
 	full := []string{subcommand, "--non-interactive"}
 	r.mu.Lock()

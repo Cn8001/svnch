@@ -99,7 +99,7 @@
           </button>
         </li>
       {:else}
-        <li class="muted empty">No servers yet. Add the repository URL you use.</li>
+        <li class="muted empty">No servers yet. Add your server's address or a repository URL.</li>
       {/each}
     </ul>
     <div class="tools">
@@ -113,7 +113,8 @@
     {#if form}
       <form class="form" onsubmit={(e) => { e.preventDefault(); save(); }}>
         <b>{editing ? "Edit server" : "Add server"}</b>
-        <label><span>Repository URL</span><input bind:value={form.url} placeholder="https://svn.example.org/repos/project" /></label>
+        <label><span>Server or repository URL</span><input bind:value={form.url} placeholder="https://svn.example.org/svn" /></label>
+        <p class="muted fine">Give the server's address to pick from the repositories on it, or one repository's own URL.</p>
         <label><span>Name (optional)</span><input bind:value={form.name} placeholder="Work" /></label>
         <label><span>Username (optional)</span><input bind:value={form.username} /></label>
         <div class="tools">
@@ -139,7 +140,7 @@
             >
               <span class="name">{e.name}{e.kind === "dir" ? "/" : ""}</span>
               <span class="muted">{size(e.size)}</span>
-              <span>r{e.lastCommit.revision}</span>
+              <span>{e.lastCommit.revision ? `r${e.lastCommit.revision}` : ""}</span>
               <span class="muted">{e.lastCommit.author}</span>
               <span class="muted">{e.lastCommit.date ? new Date(e.lastCommit.date).toLocaleDateString() : ""}</span>
             </button>
@@ -188,4 +189,5 @@
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { padding: 10px; margin: 0; }
   .form { display: grid; gap: 10px; max-width: 460px; }
+  .fine { margin: -4px 0 0; font-size: 12px; }
 </style>

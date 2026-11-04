@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -12,25 +14,28 @@ import (
 // Credentials is the runner's session login, kept apart from Runner so tests and read-only callers need not fake it.
 type Credentials interface {
 	SetCredentials(username, password string)
+	Credentials() (username, password string)
 }
 
 type SVNService struct {
 	runner svn.Runner
 	creds  Credentials
+	web    *http.Client // reads the repository index at a server root, which svn itself cannot list
 }
 
-func New(runner svn.Runner, creds Credentials) *SVNService {
-	return &SVNService{runner: runner, creds: creds}
+func New(runner svn.Runner, creds Credentials, web *http.Client) *SVNService {
+	return &SVNService{runner: runner, creds: creds, web: web}
 }
 
 // Login checks the credentials against url and keeps them for the session; a wrong password is cleared again so the
-// next command fails with the same auth error instead of a confusing one.
+// next command fails with the same auth error instead of a confusing one. It checks with List because the url may be
+// a server root that only the repository index answers for.
 func (s *SVNService) Login(ctx context.Context, url, username, password string) error {
 	if url == "" || username == "" {
 		return fmt.Errorf("login needs a url and a username: %w", svn.ErrInvalidRequest)
 	}
 	s.creds.SetCredentials(username, password)
-	if _, err := s.runner.Run(ctx, "", "info", svn.InfoArgs(url)...); err != nil {
+	if _, err := s.List(ctx, url); err != nil {
 		s.creds.SetCredentials("", "")
 		return fmt.Errorf("login to %s: %w", url, err)
 	}
@@ -137,10 +142,29 @@ func (s *SVNService) Move(ctx context.Context, from, to string) error {
 func (s *SVNService) List(ctx context.Context, target string) ([]svn.ListEntry, error) {
 	args, err := svn.ListArgs(target)
 	out, err := s.run(ctx, "", "list", args, err)
-	if err != nil {
+	if err == nil {
+		return svn.ParseList(out)
+	}
+	if !serverRoot(target, err) {
 		return nil, fmt.Errorf("list %s: %w", target, err)
 	}
-	return svn.ParseList(out)
+	username, password := s.creds.Credentials()
+	repos, idxErr := svn.ListCollection(ctx, s.web, target, username, password)
+	switch {
+	case idxErr == nil:
+		return repos, nil
+	case errors.Is(idxErr, svn.ErrAuthFailed):
+		return nil, fmt.Errorf("list %s: %w", target, idxErr)
+	}
+	return nil, fmt.Errorf("list %s: %w", target, err)
+}
+
+// serverRoot tells whether a failed list may have been pointed at the folder holding the repositories; only a web
+// server can answer for that folder, and an auth or certificate failure already says what is wrong.
+func serverRoot(target string, err error) bool {
+	var ce *svn.CommandError
+	web := strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")
+	return web && errors.As(err, &ce) && !errors.Is(err, svn.ErrAuthFailed) && !errors.Is(err, svn.ErrCertUntrusted)
 }
 
 func (s *SVNService) Diff(ctx context.Context, req svn.DiffRequest) (string, error) {

@@ -15,7 +15,9 @@
     UpdateService,
     SetupService,
     ServerService,
+    ExplorerService,
     failureCode,
+    type ExplorerStatus,
     type Server,
     type Setup,
     type AppInfo,
@@ -65,6 +67,7 @@
 
   let appInfo: AppInfo | null = $state(null);
   let updateNote = $state("");
+  let explorerMenu = $state<ExplorerStatus | null>(null);
   let modal: ModalKind | null = $state(null);
 
   let co = $state({ url: "", path: "", revision: "", depth: Depth.DepthDefault });
@@ -366,8 +369,8 @@
     notice = `At revision ${rev}.`;
   }
 
-  function openCheckout(url = "") {
-    co = { url, path: "", revision: "", depth: Depth.DepthDefault };
+  function openCheckout(url = "", path = "") {
+    co = { url, path, revision: "", depth: Depth.DepthDefault };
     modal = "checkout";
   }
 
@@ -478,6 +481,37 @@
     modal = "help";
   }
 
+  // A folder from Explorer's "Open with svnch" may not be a working copy yet; then it is where a checkout goes.
+  async function openStart(dir: string) {
+    try {
+      await svn.Info(dir);
+    } catch (e) {
+      if (failureCode(e) === "NOT_WORKING_COPY") {
+        openCheckout("", dir);
+        return;
+      }
+    }
+    await openWC(dir);
+  }
+
+  async function openSettings() {
+    updateNote = "";
+    modal = "settings";
+    try {
+      explorerMenu = await ExplorerService.Status();
+    } catch {}
+  }
+
+  async function toggleExplorer() {
+    if (!explorerMenu) return;
+    try {
+      await ExplorerService.SetEnabled(!explorerMenu.enabled);
+      explorerMenu = await ExplorerService.Status();
+    } catch (e) {
+      updateNote = errorText(e);
+    }
+  }
+
   async function openAbout() {
     modal = "about";
     if (!appInfo) {
@@ -537,7 +571,7 @@
         { label: "svnch on GitHub", action: () => Browser.OpenURL(REPO_URL) },
       ],
     },
-    { title: "Settings", action: () => { updateNote = ""; modal = "settings"; } },
+    { title: "Settings", action: openSettings },
     { title: "About", action: openAbout },
   ]);
 
@@ -566,6 +600,11 @@
     loadServers();
     await checkSvn();
     if (svnMissing) return;
+    let start = "";
+    try {
+      start = await AppService.StartFolder();
+    } catch {}
+    if (start) return openStart(start);
     let last = "";
     try {
       last = localStorage.getItem(LAST_WC) ?? "";
@@ -827,6 +866,15 @@
       </div>
       <button onclick={forgetLogin}>Forget login</button>
     </div>
+    {#if explorerMenu?.supported}
+      <div class="setting">
+        <div>
+          <b>Explorer</b>
+          <p class="muted">"Open with svnch" when you right-click a folder. On Windows 11 it is under "Show more options".</p>
+        </div>
+        <button onclick={toggleExplorer}>{explorerMenu.enabled ? "Remove from menu" : "Add to menu"}</button>
+      </div>
+    {/if}
     {#if updateNote}<p>{updateNote}</p>{/if}
   </Modal>
 {:else if modal === "login"}

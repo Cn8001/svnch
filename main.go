@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/Cn8001/svnch/internal/appinfo"
+	"github.com/Cn8001/svnch/internal/explorer"
 	"github.com/Cn8001/svnch/internal/servers"
 	"github.com/Cn8001/svnch/internal/service"
 	"github.com/Cn8001/svnch/internal/svn"
@@ -66,15 +70,27 @@ func main() {
 	}
 	store := servers.NewStore(filepath.Join(configDir, "svnch", "servers.json"))
 
+	exe, err := os.Executable()
+	if err != nil {
+		slog.Warn("own path unknown, explorer menu uses the bare name", "error", err)
+		exe = "svnch.exe"
+	}
+	menu := explorer.New(exe)
+	if err := menu.Repair(ctx); err != nil {
+		slog.Warn("explorer menu", "error", err)
+	}
+	web := &http.Client{Timeout: 30 * time.Second}
+
 	app := application.New(application.Options{
 		Name:         "svnch",
 		Description:  "A Subversion client",
 		MarshalError: service.MarshalError,
 		Services: []application.Service{
-			application.NewService(service.New(runner, runner)),
+			application.NewService(service.New(runner, runner, web)),
 			application.NewService(service.NewServerService(store)),
 			application.NewService(service.NewSetupService(binary, installErr)),
-			application.NewService(service.NewAppService(about)),
+			application.NewService(service.NewAppService(about, startFolder(os.Args[1:]))),
+			application.NewService(service.NewExplorerService(menu)),
 			application.NewService(updates),
 		},
 		Assets: application.AssetOptions{
@@ -109,6 +125,23 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// startFolder takes the first argument that is a folder, so "svnch ." and Explorer's "Open with svnch" both work and
+// flags a launcher adds are ignored.
+func startFolder(args []string) string {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if st, err := os.Stat(a); err == nil && st.IsDir() {
+			if abs, err := filepath.Abs(a); err == nil {
+				return abs
+			}
+			return a
+		}
+	}
+	return ""
 }
 
 func initUpdater(app *application.App, version string) error {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -25,6 +27,8 @@ func (f *fakeRunner) SetCredentials(username, password string) {
 	f.username, f.password = username, password
 }
 
+func (f *fakeRunner) Credentials() (string, string) { return f.username, f.password }
+
 func (f *fakeRunner) Run(_ context.Context, dir, subcommand string, args ...string) ([]byte, error) {
 	f.calls++
 	f.dir, f.subcommand, f.args = dir, subcommand, args
@@ -34,7 +38,7 @@ func (f *fakeRunner) Run(_ context.Context, dir, subcommand string, args ...stri
 func TestCheckout_ReturnsCheckedOutRevision(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{out: []byte("A    wc/a.txt\nChecked out revision 88.\n")}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	rev, err := s.Checkout(context.Background(), svn.CheckoutRequest{URL: "svn://host/repo", Path: "wc"})
@@ -54,7 +58,7 @@ func TestCheckout_ReturnsCheckedOutRevision(t *testing.T) {
 func TestCheckout_InvalidRequestDoesNotRunSvn(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	_, err := s.Checkout(context.Background(), svn.CheckoutRequest{Path: "wc"})
@@ -71,7 +75,7 @@ func TestCheckout_InvalidRequestDoesNotRunSvn(t *testing.T) {
 func TestInfo_KeepsSvnErrorMatchable(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{err: &svn.CommandError{Subcommand: "info", Code: "E155007"}}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	_, err := s.Info(context.Background(), "/tmp")
@@ -85,7 +89,7 @@ func TestInfo_KeepsSvnErrorMatchable(t *testing.T) {
 func TestStatus_ParsesEntries(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{out: []byte(`<status><target path="/wc"><entry path="/wc/a"><wc-status item="modified" props="none" revision="3"></wc-status></entry></target></status>`)}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	entries, err := s.Status(context.Background(), "/wc")
@@ -102,7 +106,7 @@ func TestStatus_ParsesEntries(t *testing.T) {
 func TestCommit_EmptyMessageDoesNotRunSvn(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	_, err := s.Commit(context.Background(), svn.CommitRequest{Paths: []string{"/wc"}})
@@ -120,7 +124,7 @@ func TestDiff_ReturnsRawText(t *testing.T) {
 	// Arrange
 	diff := "Index: a.txt\n===\n--- a.txt\t(revision 3)\n+++ a.txt\t(working copy)\n@@ -1 +1 @@\n-old\n+new\n"
 	runner := &fakeRunner{out: []byte(diff)}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	got, err := s.Diff(context.Background(), svn.DiffRequest{Target: "/wc/a.txt"})
@@ -134,7 +138,7 @@ func TestDiff_ReturnsRawText(t *testing.T) {
 func TestShelve_RunsInsideWorkingCopy(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	err := s.Shelve(context.Background(), "/wc", "wip", "")
@@ -151,7 +155,7 @@ func TestShelve_RunsInsideWorkingCopy(t *testing.T) {
 func TestHelp_RejectsFlagAsTopic(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	_, err := s.Help(context.Background(), "--version")
@@ -168,7 +172,7 @@ func TestHelp_RejectsFlagAsTopic(t *testing.T) {
 func TestLogin_WrongPasswordIsCleared(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{err: &svn.CommandError{Subcommand: "info", Code: "E215004"}}
-	s := New(runner, runner)
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	err := s.Login(context.Background(), "https://svn.example.org/repo", "me", "wrong")
@@ -184,8 +188,8 @@ func TestLogin_WrongPasswordIsCleared(t *testing.T) {
 
 func TestLogin_KeepsWorkingCredentials(t *testing.T) {
 	// Arrange
-	runner := &fakeRunner{out: []byte(`<info><entry kind="dir" path="repo" revision="3"></entry></info>`)}
-	s := New(runner, runner)
+	runner := &fakeRunner{out: []byte(`<lists><list path="https://svn.example.org/repo"></list></lists>`)}
+	s := New(runner, runner, http.DefaultClient)
 
 	// Act
 	err := s.Login(context.Background(), "https://svn.example.org/repo", "me", "secret")
@@ -209,5 +213,71 @@ func TestToFailure_MapsAuthAndKeepsSvnCode(t *testing.T) {
 	// Assert
 	if f.Code != "AUTH" || f.SvnCode != "E215004" {
 		t.Errorf("failure = %+v", f)
+	}
+}
+
+func TestList_ServerRootFallsBackToRepositoryIndex(t *testing.T) {
+	// Arrange
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><head><title>Collection of Repositories</title></head><body><h2>Collection of Repositories</h2>
+<ul><li><a href="alpha/">alpha/</a></li><li><a href="beta%20two/">beta two/</a></li></ul>
+<hr noshade><em>Powered by <a href="http://subversion.apache.org/">Apache Subversion</a></em></body></html>`)
+	}))
+	defer web.Close()
+	runner := &fakeRunner{err: &svn.CommandError{Subcommand: "list", Code: "E175002"}}
+	s := New(runner, runner, web.Client())
+
+	// Act
+	got, err := s.List(context.Background(), web.URL+"/svn")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "beta two" || got[1].Kind != "dir" {
+		t.Errorf("entries = %+v", got)
+	}
+}
+
+func TestList_ServerRootAskingForPasswordIsAuth(t *testing.T) {
+	// Arrange
+	var sent string
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent, _, _ = r.BasicAuth()
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer web.Close()
+	runner := &fakeRunner{err: &svn.CommandError{Subcommand: "list", Code: "E175002"}, username: "me", password: "pw"}
+	s := New(runner, runner, web.Client())
+
+	// Act
+	_, err := s.List(context.Background(), web.URL+"/svn")
+
+	// Assert
+	if !errors.Is(err, svn.ErrAuthFailed) {
+		t.Errorf("err = %v, want ErrAuthFailed", err)
+	}
+	if sent != "me" {
+		t.Errorf("index sent username %q, want the session login", sent)
+	}
+}
+
+func TestList_OtherPageKeepsSvnError(t *testing.T) {
+	// Arrange
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><head><title>Welcome</title></head><body><a href="docs/">docs</a></body></html>`)
+	}))
+	defer web.Close()
+	svnErr := &svn.CommandError{Subcommand: "list", Code: "E175002"}
+	runner := &fakeRunner{err: svnErr}
+	s := New(runner, runner, web.Client())
+
+	// Act
+	_, err := s.List(context.Background(), web.URL)
+
+	// Assert
+	var ce *svn.CommandError
+	if !errors.As(err, &ce) || ce != svnErr {
+		t.Errorf("err = %v, want the svn error", err)
 	}
 }

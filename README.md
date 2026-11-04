@@ -12,7 +12,10 @@ svnch requires `svn` cli commands.
 Check out, update and commit; see what changed and the diff of each file;
 add, delete, revert and rename from a right-click; read the log; merge and
 shelve. Saved servers and a repository browser mean you never type a URL
-twice.
+twice; give a server's address and pick from the repositories on it.
+
+On Windows, Settings can add "Open with svnch" to the right-click menu of
+folders.
 
 
 ## Building
