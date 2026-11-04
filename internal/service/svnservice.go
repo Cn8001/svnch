@@ -34,6 +34,15 @@ func (s *SVNService) Commit(repo string) {
 
 }
 
-func (s *SVNService) Checkout(repo string) {
-
+// Checkout has no timeout of its own because a large repository can take many minutes; the caller cancels through ctx.
+func (s *SVNService) Checkout(ctx context.Context, req svn.CheckoutRequest) (int64, error) {
+	args, err := svn.CheckoutArgs(req)
+	if err != nil {
+		return 0, err
+	}
+	out, err := s.runner.Run(ctx, "checkout", args...)
+	if err != nil {
+		return 0, fmt.Errorf("checkout %s: %w", req.URL, err)
+	}
+	return svn.ParseCheckout(out)
 }
