@@ -47,28 +47,30 @@
   .diff { display: flex; flex-direction: column; min-height: 0; height: 100%; }
   .head {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 2px 8px;
-    border-bottom: 2px solid var(--ink);
-    background: var(--cream);
-    font-weight: bold;
+    height: 34px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600;
   }
-  .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
   .body { flex: 1; overflow: auto; background: var(--field); }
-  pre { min-width: max-content; }
-  .line { display: grid; grid-template-columns: 4.5ch 4.5ch 1fr; }
+  pre { min-width: max-content; line-height: 1.55; }
+  .line { display: grid; grid-template-columns: 5ch 5ch 1fr; }
   .num {
-    padding-right: 6px;
+    padding-right: 8px;
     text-align: right;
     color: var(--muted);
-    border-right: 1px solid rgba(36, 33, 30, 0.2);
+    opacity: 0.7;
+    border-right: 1px solid var(--line);
     user-select: none;
   }
-  .txt { padding-left: 8px; padding-right: 12px; white-space: pre; }
+  .txt { padding-left: 10px; padding-right: 12px; white-space: pre; }
   .add { background: var(--add-bg); color: var(--add-ink); }
   .del { background: var(--del-bg); color: var(--del-ink); }
-  .hunk { background: var(--cream); color: var(--brick); }
+  .hunk { background: var(--hunk-bg); color: var(--hunk-ink); }
   .meta { color: var(--muted); font-weight: bold; }
-  .empty { padding: 12px; margin: 0; }
+  .empty { padding: 16px; margin: 0; }
 </style>

@@ -14,12 +14,14 @@ type StatusEntry struct {
 	TreeConflicted bool   `json:"treeConflicted"`
 }
 
+// StatusArgs lists ignored items too, for the collapsed Ignored group; svn stops at an ignored folder, so a build
+// output tree is one entry, not thousands.
 func StatusArgs(path string) ([]string, error) {
 	t, err := targets(path)
 	if err != nil {
 		return nil, err
 	}
-	return append([]string{"--xml"}, t...), nil
+	return append([]string{"--xml", "--no-ignore"}, t...), nil
 }
 
 func ParseStatus(data []byte) ([]StatusEntry, error) {

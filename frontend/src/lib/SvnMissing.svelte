@@ -53,14 +53,14 @@
 </div>
 
 <style>
-  .missing { max-width: 560px; display: grid; gap: 8px; text-align: left; }
-  h2 { margin: 0; font-size: 16px; }
+  .missing { max-width: 580px; display: grid; gap: 10px; text-align: left; }
+  h2 { margin: 0; font-size: 17px; }
   p { margin: 0; }
   ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
   li { display: grid; grid-template-columns: 9em 1fr auto; align-items: center; gap: 8px; }
   code { font-weight: bold; }
-  li code { font-weight: normal; padding: 3px 6px; background: var(--field); border: 2px solid var(--ink); user-select: text; }
+  li code { font-weight: normal; padding: 5px 8px; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius); user-select: text; }
   .small { font-size: 12px; }
-  button.small { padding: 1px 8px; box-shadow: 1px 1px 0 var(--ink); }
-  .actions { display: flex; gap: 10px; margin-top: 6px; }
+  button.small { padding: 2px 10px; }
+  .actions { display: flex; gap: 10px; margin-top: 8px; }
 </style>

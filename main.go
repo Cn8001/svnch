@@ -117,8 +117,8 @@ func main() {
 		Height:    760,
 		MinWidth:  860, // file list and diff still fit side by side
 		MinHeight: 540,
-		// The page's own paper colour, so the window does not flash dark before the frontend paints.
-		BackgroundColour: application.NewRGB(239, 230, 207),
+		// The dark theme's background, so the window does not flash a different colour before the frontend paints.
+		BackgroundColour: application.NewRGB(22, 24, 28),
 		URL:              "/",
 	})
 

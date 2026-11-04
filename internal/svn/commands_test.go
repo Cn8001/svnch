@@ -12,7 +12,7 @@ func TestArgs_Builders(t *testing.T) {
 		build func() ([]string, error)
 		want  []string
 	}{
-		"status":            {func() ([]string, error) { return StatusArgs("/wc") }, []string{"--xml", "--", "/wc"}},
+		"status":            {func() ([]string, error) { return StatusArgs("/wc") }, []string{"--xml", "--no-ignore", "--", "/wc"}},
 		"update":            {func() ([]string, error) { return UpdateArgs("/wc") }, []string{"--", "/wc"}},
 		"commit":            {func() ([]string, error) { return CommitArgs(CommitRequest{Paths: []string{"/wc/a"}, Message: "fix"}) }, []string{"-m", "fix", "--", "/wc/a"}},
 		"add":               {func() ([]string, error) { return AddArgs("/wc/new/a") }, []string{"--parents", "--", "/wc/new/a"}},

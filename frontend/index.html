@@ -5,6 +5,14 @@
     <link rel="icon" type="image/png" href="/appicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/style.css" />
+    <!-- Applied before the app loads so a light theme does not flash dark first. -->
+    <script>
+      try {
+        const t = localStorage.getItem("svnch.theme");
+        const light = t === "light" || (t === "system" && matchMedia("(prefers-color-scheme: light)").matches);
+        if (light) document.documentElement.dataset.theme = "light";
+      } catch {}
+    </script>
     <title>svnch</title>
   </head>
   <body>

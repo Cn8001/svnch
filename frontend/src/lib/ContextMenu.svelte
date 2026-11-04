@@ -42,24 +42,24 @@
   .ctx {
     position: fixed;
     z-index: 30;
-    min-width: 200px;
+    min-width: 210px;
     margin: 0;
-    padding: 3px 0;
+    padding: 4px;
     list-style: none;
-    background: var(--panel);
-    border: 2px solid var(--ink);
-    box-shadow: 3px 3px 0 var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
   }
   button {
     display: block;
     width: 100%;
     border: 0;
-    box-shadow: none;
+    border-radius: 4px;
     background: transparent;
-    padding: 3px 12px;
+    padding: 4px 10px;
     text-align: left;
   }
-  button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
-  button:active { transform: none; }
-  .sep { border-top: 1px solid var(--muted); margin: 3px 8px; }
+  button:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+  .sep { border-top: 1px solid var(--line); margin: 4px 6px; }
 </style>

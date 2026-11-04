@@ -36,6 +36,34 @@
 
   const REPO_URL = "https://github.com/Cn8001/svnch";
   const LAST_WC = "svnch.lastWorkingCopy";
+  const THEME = "svnch.theme";
+
+  type Theme = "dark" | "light" | "system";
+  let theme = $state<Theme>(readTheme());
+  const prefersLight = matchMedia("(prefers-color-scheme: light)");
+  let systemLight = $state(prefersLight.matches);
+  prefersLight.addEventListener("change", (e) => (systemLight = e.matches));
+
+  function readTheme(): Theme {
+    try {
+      const t = localStorage.getItem(THEME);
+      return t === "light" || t === "system" ? t : "dark";
+    } catch {
+      return "dark";
+    }
+  }
+
+  function setTheme(t: Theme) {
+    theme = t;
+    try {
+      localStorage.setItem(THEME, t);
+    } catch {}
+  }
+
+  $effect(() => {
+    const light = theme === "light" || (theme === "system" && systemLight);
+    document.documentElement.dataset.theme = light ? "light" : "dark";
+  });
 
   let wc = $state("");
   let info: Info | null = $state(null);
@@ -329,18 +357,19 @@
     const sel = paths.map(entry).filter((x): x is StatusEntry => !!x);
     const many = paths.length > 1;
     const n = many ? ` (${paths.length})` : "";
-    const versioned = !!e && isVersioned(e);
+    const folder = !e; // a folder row in the tree that only holds changes; svn lists it only when it changed itself
+    const versioned = folder || isVersioned(e);
     const unversioned = sel.filter((x) => !isVersioned(x)).map((x) => x.path);
     return [
       { label: "Show diff", action: () => showDiff(path), disabled: many || !versioned },
       { separator: true },
       { label: "Add" + (unversioned.length > 1 ? ` (${unversioned.length})` : ""), action: () => add(unversioned), disabled: !unversioned.length },
-      { label: "Revert..." + n, action: () => revert(paths), disabled: !sel.some(isVersioned) },
+      { label: "Revert..." + n, action: () => revert(paths), disabled: !folder && !sel.some(isVersioned) },
       { label: "Delete..." + n, action: () => remove(paths, false), disabled: unversioned.length > 0 },
       { label: "Remove from svn, keep file..." + n, action: () => remove(paths, true), disabled: unversioned.length > 0 },
       { label: "Rename / move...", action: () => openMove(path), disabled: many || !versioned },
       { separator: true },
-      { label: "Show log", action: () => openLog(path), disabled: many || !versioned || e?.item === "added" },
+      { label: "Show log", action: () => openLog(path), disabled: many || !versioned || e?.item === "added" || e?.item === "ignored" },
       { label: "Copy path", action: () => Clipboard.SetText(path) },
     ];
   }
@@ -644,6 +673,7 @@
   <div class="toolbar">
     <button onclick={openFolder} disabled={!!busy || svnMissing}>Open...</button>
     <button onclick={openRepos} disabled={!!busy || svnMissing}>Repos</button>
+    <span class="sep"></span>
     <button onclick={update} disabled={!wc || !!busy}>Update</button>
     <button onclick={refresh} disabled={!wc || !!busy}>Refresh</button>
     <button onclick={() => openLog(wc)} disabled={!wc || !!busy}>Log</button>
@@ -682,7 +712,6 @@
             {focused}
             onfocus={showDiff}
             ontoggle={(p) => (checked.has(p) ? checked.delete(p) : checked.add(p))}
-            ontoggleall={(on) => (on ? entries.forEach((e) => checked.add(e.path)) : checked.clear())}
             oncontext={(p, e) => (ctxMenu = { x: e.clientX, y: e.clientY, items: contextItems(p) })}
           />
         </div>
@@ -877,6 +906,17 @@
   <Modal title="Settings" onclose={() => (modal = null)}>
     <div class="setting">
       <div>
+        <b>Theme</b>
+        <p class="muted">System follows your desktop's light or dark setting.</p>
+      </div>
+      <div class="segmented" role="group" aria-label="Theme">
+        {#each [["dark", "Dark"], ["light", "Light"], ["system", "System"]] as [value, label]}
+          <button class:on={theme === value} onclick={() => setTheme(value as Theme)}>{label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="setting">
+      <div>
         <b>Updates</b>
         <p class="muted">svnch looks for a new release each time it starts.</p>
       </div>
@@ -962,38 +1002,44 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border-bottom: 2px solid var(--ink);
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
   }
-  .where { display: flex; align-items: baseline; gap: 12px; margin-left: 8px; min-width: 0; }
+  .toolbar .sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line); }
+  .where { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; }
   .where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .where .path { font-weight: bold; }
-  .rev { padding: 0 6px; border: 2px solid var(--ink); background: var(--cream); }
+  .where .path { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .where .muted { font-family: var(--mono); font-size: 12px; }
+  .rev { padding: 1px 8px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-family: var(--mono); font-size: 12px; font-weight: 700; }
 
-  .welcome { display: grid; place-content: center; justify-items: center; gap: 12px; text-align: center; }
-  .welcome img { width: 128px; height: 128px; }
+  .welcome { display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; }
+  .welcome img { width: 120px; height: 120px; }
   .welcome p { margin: 0; }
   .actions { display: flex; gap: 10px; }
 
-  main { display: grid; grid-template-columns: minmax(280px, 38%) 1fr; min-height: 0; }
-  .left { display: flex; flex-direction: column; min-height: 0; border-right: 2px solid var(--ink); background: var(--panel); }
+  main { display: grid; grid-template-columns: minmax(300px, 36%) 1fr; min-height: 0; }
+  .left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
   .files { flex: 1; min-height: 0; }
-  .commit { display: grid; gap: 6px; padding: 8px; border-top: 2px solid var(--ink); background: var(--cream); }
-  .right { min-width: 0; min-height: 0; }
+  .commit { display: grid; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  .commit button { padding: 6px 12px; }
+  .right { min-width: 0; min-height: 0; background: var(--bg); }
 
   .status {
     display: flex;
     align-items: center;
     gap: 10px;
     min-height: 26px;
-    padding: 2px 8px;
-    border-top: 2px solid var(--ink);
-    background: var(--cream);
+    padding: 2px 10px;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--muted);
   }
   .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .small { padding: 0 8px; box-shadow: 1px 1px 0 var(--ink); }
-  .link { border: 0; box-shadow: none; background: transparent; padding: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .small { padding: 0 8px; font-size: 12px; }
+  .link { border: 0; background: transparent; padding: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .link:hover:not(:disabled) { background: transparent; text-decoration: underline; }
 
   .row { display: flex; gap: 8px; align-items: end; }
@@ -1005,35 +1051,36 @@
   .output {
     max-height: 50vh;
     overflow: auto;
-    padding: 8px;
+    padding: 10px;
     background: var(--field);
-    border: 2px solid var(--ink);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
     white-space: pre-wrap;
   }
 
-  .log { display: grid; grid-template-columns: minmax(240px, 40%) 1fr; gap: 10px; height: 55vh; }
-  .revs { margin: 0; padding: 0; list-style: none; overflow: auto; border: 2px solid var(--ink); background: var(--field); }
+  .log { display: grid; grid-template-columns: minmax(240px, 40%) 1fr; gap: 12px; height: 55vh; }
+  .revs { margin: 0; padding: 4px; list-style: none; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
   .revs button {
     display: block;
     width: 100%;
     border: 0;
-    border-bottom: 1px dotted rgba(36, 33, 30, 0.2);
-    box-shadow: none;
+    border-radius: 4px;
     background: transparent;
     text-align: left;
-    padding: 4px 8px;
+    padding: 5px 8px;
   }
-  .revs button:active { transform: none; }
-  .revs button.sel { background: var(--select); }
+  .revs button:hover:not(:disabled) { background: var(--hover); }
+  .revs button.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
   .revs .msg { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .detail { display: grid; grid-template-rows: auto auto 1fr; gap: 8px; min-height: 0; }
-  .paths { overflow: auto; padding: 8px; border: 2px solid var(--ink); background: var(--field); }
+  .paths { overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
   .act { font-weight: bold; }
   .act.A { color: var(--add-ink); }
-  .act.D { color: var(--brick); }
+  .act.M { color: var(--mod-ink); }
+  .act.D { color: var(--del-ink); }
 
-  .about { display: flex; gap: 16px; align-items: center; }
-  .about img { width: 112px; height: 112px; }
+  .about { display: flex; gap: 18px; align-items: center; }
+  .about img { width: 104px; height: 104px; }
   .about h1 { margin: 0 0 6px; font-size: 20px; }
   .about p { margin: 0 0 10px; }
   .about .row { flex-wrap: wrap; align-items: center; }
@@ -1041,18 +1088,23 @@
   .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
   .setting p { margin: 4px 0 0; }
   .setting .buttons { display: flex; gap: 6px; }
-  .setting + .setting { margin-top: 8px; padding-top: 10px; border-top: 1px dotted var(--muted); }
-  .login { display: grid; gap: 10px; }
+  .setting + .setting { margin-top: 2px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .segmented { display: flex; padding: 2px; gap: 2px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--field); }
+  .segmented button { border: 0; padding: 3px 10px; background: transparent; color: var(--muted); }
+  .segmented button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+  .segmented button.on { background: var(--raised); color: var(--text); }
+  .login { display: grid; gap: 12px; }
   .login p { margin: 0; }
-  .login .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .login .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
   .fine { font-size: 12px; }
   .end { display: flex; justify-content: flex-end; gap: 8px; }
   .notices { max-height: 28vh; }
-  .licenses { border: 2px solid var(--ink); background: var(--field); }
-  .licenses details { border-bottom: 1px dotted rgba(36, 33, 30, 0.25); }
-  .licenses summary { padding: 4px 8px; cursor: pointer; }
-  .licenses summary:hover { background: var(--select); }
-  .licenses details[open] summary { background: var(--cream); }
-  .licenses details .output { margin: 6px 8px 8px; max-height: 40vh; }
+  .licenses { border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); overflow: hidden; }
+  .licenses details { border-bottom: 1px solid var(--line); }
+  .licenses details:last-child { border-bottom: 0; }
+  .licenses summary { padding: 6px 10px; cursor: pointer; }
+  .licenses summary:hover { background: var(--hover); }
+  .licenses details[open] summary { background: var(--raised); }
+  .licenses details .output { margin: 8px 10px 10px; max-height: 40vh; }
   .lic { float: right; }
 </style>

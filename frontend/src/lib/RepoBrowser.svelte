@@ -192,34 +192,35 @@
 </div>
 
 <style>
-  .browser { display: grid; grid-template-columns: 230px 1fr; gap: 10px; height: 60vh; }
+  .browser { display: grid; grid-template-columns: 240px 1fr; gap: 12px; height: 60vh; }
   aside, section { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
-  aside ul { flex: 1; margin: 0; padding: 0; list-style: none; overflow: auto; border: 2px solid var(--ink); background: var(--field); }
-  .head { font-weight: bold; }
+  aside ul { flex: 1; margin: 0; padding: 4px; list-style: none; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+  .head { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
   .srv, .row {
     display: block;
     width: 100%;
     border: 0;
-    border-bottom: 1px dotted rgba(36, 33, 30, 0.2);
-    box-shadow: none;
+    border-radius: 4px;
     background: transparent;
     text-align: left;
-    padding: 4px 8px;
+    padding: 5px 8px;
   }
-  .srv:active, .row:active { transform: none; }
+  .srv:hover:not(:disabled), .row:hover:not(:disabled) { background: var(--hover); }
   .srv span { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
-  .sel { background: var(--select) !important; }
+  .sel, .sel:hover:not(:disabled) { background: var(--accent-soft) !important; box-shadow: inset 2px 0 0 var(--accent); }
   .tools { display: flex; gap: 6px; flex-wrap: wrap; }
   .tools.end { align-items: center; }
-  .where { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .where { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-family: var(--mono); font-size: 12px; }
   .path { display: flex; gap: 6px; }
-  .path input { flex: 1; min-width: 0; }
-  .table { flex: 1; display: flex; flex-direction: column; min-height: 0; border: 2px solid var(--ink); background: var(--field); }
-  .rows { overflow: auto; flex: 1; }
+  .path input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; }
+  .table { flex: 1; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); overflow: hidden; }
+  .rows { overflow: auto; flex: 1; padding: 4px; }
   .row { display: grid; grid-template-columns: 1fr 6em 5em 8em 7em; gap: 8px; }
-  .hdr { font-weight: bold; background: var(--cream); border-bottom: 2px solid var(--ink); }
+  .hdr { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--line); border-radius: 0; padding: 6px 12px; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { padding: 10px; margin: 0; }
-  .form { display: grid; gap: 10px; max-width: 460px; }
-  .fine { margin: -4px 0 0; font-size: 12px; }
+  .form { display: grid; gap: 12px; max-width: 480px; }
+  .fine { margin: -6px 0 0; font-size: 12px; }
+  .bad { color: var(--danger); }
+  .grow { flex: 1; }
 </style>

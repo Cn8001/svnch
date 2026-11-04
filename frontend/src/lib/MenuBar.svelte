@@ -56,41 +56,43 @@
   .bar {
     display: flex;
     align-items: stretch;
-    background: var(--cream);
-    border-bottom: 2px solid var(--ink);
-    height: 30px;
+    gap: 2px;
+    padding: 0 6px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    height: 32px;
   }
   .brand {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 0 12px 0 8px;
-    font-weight: bold;
-    border-right: 2px solid var(--ink);
+    gap: 7px;
+    padding: 0 12px 0 4px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
   }
-  .brand img { width: 18px; height: 18px; }
-  .menu { position: relative; }
+  .brand img { width: 18px; height: 18px; border-radius: 4px; }
+  .menu { position: relative; display: flex; align-items: center; }
   .title {
-    height: 100%;
+    height: 24px;
     border: 0;
-    box-shadow: none;
     background: transparent;
-    padding: 0 12px;
+    padding: 0 10px;
+    color: var(--muted);
   }
-  .title.active, .title:hover { background: var(--ink); color: var(--paper); }
-  .title:active { transform: none; }
+  .title.active, .title:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .drop {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 4px);
     left: 0;
     z-index: 20;
-    min-width: 220px;
+    min-width: 230px;
     margin: 0;
-    padding: 3px 0;
+    padding: 4px;
     list-style: none;
-    background: var(--panel);
-    border: 2px solid var(--ink);
-    box-shadow: 3px 3px 0 var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
   }
   .drop button {
     display: flex;
@@ -98,14 +100,13 @@
     gap: 24px;
     width: 100%;
     border: 0;
-    box-shadow: none;
+    border-radius: 4px;
     background: transparent;
-    padding: 3px 12px;
+    padding: 4px 10px;
     text-align: left;
   }
-  .drop button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
-  .drop button:active { transform: none; }
-  .hint { color: var(--muted); }
-  .drop button:hover .hint { color: var(--cream); }
-  .sep { border-top: 1px solid var(--muted); margin: 3px 8px; }
+  .drop button:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .drop button:hover:not(:disabled) .hint { color: inherit; opacity: 0.75; }
+  .sep { border-top: 1px solid var(--line); margin: 4px 6px; }
 </style>
