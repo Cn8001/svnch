@@ -1,9 +1,22 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { MenuItem } from "./svn";
 
   let { x, y, items, onclose }: { x: number; y: number; items: MenuItem[]; onclose: () => void } = $props();
 
   let el: HTMLUListElement | undefined = $state();
+
+  // The click or right-click that opened the menu is still travelling up to the window when the menu mounts, and
+  // would close it at once; the window listeners only count once that event is over.
+  let armed = false;
+  onMount(() => {
+    const t = setTimeout(() => (armed = true));
+    return () => clearTimeout(t);
+  });
+
+  function close() {
+    if (armed) onclose();
+  }
 
   // Flip the menu back inside the window when it was opened near the right or bottom edge.
   let pos = $derived.by(() => {
@@ -17,10 +30,10 @@
 </script>
 
 <svelte:window
-  onclick={onclose}
-  oncontextmenu={onclose}
+  onclick={close}
+  oncontextmenu={close}
   onkeydown={(e) => e.key === "Escape" && onclose()}
-  onblur={onclose}
+  onblur={close}
 />
 
 <ul class="ctx" bind:this={el} style:left="{pos.left}px" style:top="{pos.top}px">
