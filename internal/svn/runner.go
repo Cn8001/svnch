@@ -7,16 +7,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 )
 
 var (
 	ErrSvnNotFound    = errors.New("svn executable not found")
 	ErrNotWorkingCopy = errors.New("not a working copy")
+	ErrInvalidRequest = errors.New("invalid request")
 )
 
 type Runner interface {
-	Run(ctx context.Context, subcommand string, args ...string) ([]byte, error)
+	Run(ctx context.Context, dir, subcommand string, args ...string) ([]byte, error) // dir empty means the process directory
 }
 
 type ExecRunner struct {
@@ -27,10 +30,11 @@ func NewExecRunner(binary string) *ExecRunner {
 	return &ExecRunner{binary: binary}
 }
 
-func (r *ExecRunner) Run(ctx context.Context, subcommand string, args ...string) ([]byte, error) {
+func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...string) ([]byte, error) {
 	full := append([]string{subcommand, "--non-interactive"}, args...)
 
 	cmd := exec.CommandContext(ctx, r.binary, full...)
+	cmd.Dir = dir
 	// Keeps stderr in English so error codes and messages read the same on every machine.
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 
@@ -110,4 +114,39 @@ func pegSafe(target string) string {
 		return target + "@"
 	}
 	return target
+}
+
+// targets ends option parsing first, so a path that starts with a dash is never read as a flag.
+func targets(paths ...string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no path given: %w", ErrInvalidRequest)
+	}
+	out := []string{"--"}
+	for _, p := range paths {
+		if p == "" {
+			return nil, fmt.Errorf("empty path: %w", ErrInvalidRequest)
+		}
+		out = append(out, pegSafe(p))
+	}
+	return out, nil
+}
+
+// lastRevision reads N from the last "<prefix>N." line, since checkout, update and commit have no --xml output.
+func lastRevision(out []byte, prefixes ...string) (int64, bool, error) {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range slices.Backward(lines) {
+		line = strings.TrimSpace(line)
+		for _, p := range prefixes {
+			rest, ok := strings.CutPrefix(line, p)
+			if !ok {
+				continue
+			}
+			rev, err := strconv.ParseInt(strings.TrimSuffix(rest, "."), 10, 64)
+			if err != nil {
+				return 0, false, fmt.Errorf("parse revision %q: %w", line, err)
+			}
+			return rev, true, nil
+		}
+	}
+	return 0, false, nil
 }

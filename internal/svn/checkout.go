@@ -3,12 +3,8 @@ package svn
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
-	"strings"
 )
-
-var ErrInvalidRequest = errors.New("invalid request")
 
 type Depth string
 
@@ -46,22 +42,20 @@ func CheckoutArgs(req CheckoutRequest) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("checkout depth %q: %w", req.Depth, ErrInvalidRequest)
 	}
-	return append(args, "--", pegSafe(req.URL), pegSafe(req.Path)), nil
+	t, err := targets(req.URL, req.Path)
+	if err != nil {
+		return nil, err
+	}
+	return append(args, t...), nil
 }
 
-// ParseCheckout reads the revision from the closing line, since checkout has no --xml output.
 func ParseCheckout(out []byte) (int64, error) {
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range slices.Backward(lines) {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "Checked out revision ")
-		if !ok {
-			continue
-		}
-		rev, err := strconv.ParseInt(strings.TrimSuffix(rest, "."), 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("parse checkout revision %q: %w", rest, err)
-		}
-		return rev, nil
+	rev, ok, err := lastRevision(out, "Checked out revision ")
+	if err != nil {
+		return 0, fmt.Errorf("parse checkout: %w", err)
 	}
-	return 0, errors.New("parse checkout: no revision line in output")
+	if !ok {
+		return 0, errors.New("parse checkout: no revision line in output")
+	}
+	return rev, nil
 }

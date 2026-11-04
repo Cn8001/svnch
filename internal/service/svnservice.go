@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Cn8001/svnch/internal/svn"
@@ -16,13 +17,21 @@ func New(runner svn.Runner) *SVNService {
 	return &SVNService{runner: runner}
 }
 
+// run takes the args builder's error as well, so each command reads as one line of build, run, parse.
+func (s *SVNService) run(ctx context.Context, dir, subcommand string, args []string, argErr error) ([]byte, error) {
+	if argErr != nil {
+		return nil, argErr
+	}
+	return s.runner.Run(ctx, dir, subcommand, args...)
+}
+
 func (s *SVNService) Info(ctx context.Context, target string) (svn.Info, error) {
 
 	// Give 30 seconds to info command
 	runctx, stop := context.WithTimeout(ctx, time.Second*30)
 	defer stop()
 
-	out, err := s.runner.Run(runctx, "info", svn.InfoArgs(target)...)
+	out, err := s.runner.Run(runctx, "", "info", svn.InfoArgs(target)...)
 
 	if err != nil {
 		return svn.Info{}, fmt.Errorf("info %s: %w", target, err)
@@ -30,19 +39,151 @@ func (s *SVNService) Info(ctx context.Context, target string) (svn.Info, error) 
 	return svn.ParseInfo(out)
 }
 
-func (s *SVNService) Commit(repo string) {
-
-}
-
 // Checkout has no timeout of its own because a large repository can take many minutes; the caller cancels through ctx.
 func (s *SVNService) Checkout(ctx context.Context, req svn.CheckoutRequest) (int64, error) {
 	args, err := svn.CheckoutArgs(req)
-	if err != nil {
-		return 0, err
-	}
-	out, err := s.runner.Run(ctx, "checkout", args...)
+	out, err := s.run(ctx, "", "checkout", args, err)
 	if err != nil {
 		return 0, fmt.Errorf("checkout %s: %w", req.URL, err)
 	}
 	return svn.ParseCheckout(out)
+}
+
+func (s *SVNService) Status(ctx context.Context, path string) ([]svn.StatusEntry, error) {
+	args, err := svn.StatusArgs(path)
+	out, err := s.run(ctx, "", "status", args, err)
+	if err != nil {
+		return nil, fmt.Errorf("status %s: %w", path, err)
+	}
+	return svn.ParseStatus(out)
+}
+
+func (s *SVNService) Update(ctx context.Context, paths []string) (int64, error) {
+	args, err := svn.UpdateArgs(paths...)
+	out, err := s.run(ctx, "", "update", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("update: %w", err)
+	}
+	return svn.ParseUpdate(out)
+}
+
+// Commit returns 0 when there was nothing to commit.
+func (s *SVNService) Commit(ctx context.Context, req svn.CommitRequest) (int64, error) {
+	args, err := svn.CommitArgs(req)
+	out, err := s.run(ctx, "", "commit", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
+	return svn.ParseCommit(out)
+}
+
+func (s *SVNService) Add(ctx context.Context, paths []string) error {
+	args, err := svn.AddArgs(paths...)
+	if _, err := s.run(ctx, "", "add", args, err); err != nil {
+		return fmt.Errorf("add: %w", err)
+	}
+	return nil
+}
+
+// Delete with keepLocal stops versioning the paths but leaves the files on disk.
+func (s *SVNService) Delete(ctx context.Context, paths []string, keepLocal bool) error {
+	args, err := svn.DeleteArgs(keepLocal, paths...)
+	if _, err := s.run(ctx, "", "delete", args, err); err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+	return nil
+}
+
+func (s *SVNService) Revert(ctx context.Context, paths []string) error {
+	args, err := svn.RevertArgs(paths...)
+	if _, err := s.run(ctx, "", "revert", args, err); err != nil {
+		return fmt.Errorf("revert: %w", err)
+	}
+	return nil
+}
+
+func (s *SVNService) Move(ctx context.Context, from, to string) error {
+	args, err := svn.MoveArgs(from, to)
+	if _, err := s.run(ctx, "", "move", args, err); err != nil {
+		return fmt.Errorf("move %s to %s: %w", from, to, err)
+	}
+	return nil
+}
+
+func (s *SVNService) List(ctx context.Context, target string) ([]svn.ListEntry, error) {
+	args, err := svn.ListArgs(target)
+	out, err := s.run(ctx, "", "list", args, err)
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", target, err)
+	}
+	return svn.ParseList(out)
+}
+
+func (s *SVNService) Diff(ctx context.Context, req svn.DiffRequest) (string, error) {
+	args, err := svn.DiffArgs(req)
+	out, err := s.run(ctx, "", "diff", args, err)
+	if err != nil {
+		return "", fmt.Errorf("diff %s: %w", req.Target, err)
+	}
+	return string(out), nil
+}
+
+func (s *SVNService) Log(ctx context.Context, req svn.LogRequest) ([]svn.LogEntry, error) {
+	args, err := svn.LogArgs(req)
+	out, err := s.run(ctx, "", "log", args, err)
+	if err != nil {
+		return nil, fmt.Errorf("log %s: %w", req.Target, err)
+	}
+	return svn.ParseLog(out)
+}
+
+// Merge returns svn's own summary, since its lines (U a.txt, C b.txt) are what a user reads to judge a merge.
+func (s *SVNService) Merge(ctx context.Context, req svn.MergeRequest) (string, error) {
+	args, err := svn.MergeArgs(req)
+	out, err := s.run(ctx, "", "merge", args, err)
+	if err != nil {
+		return "", fmt.Errorf("merge %s: %w", req.Source, err)
+	}
+	return string(out), nil
+}
+
+// The shelve commands act on the working copy around the current directory, so they run inside wc.
+func (s *SVNService) Shelve(ctx context.Context, wc, name, message string) error {
+	args, err := svn.ShelveArgs(name, message)
+	if _, err := s.run(ctx, wc, svn.ShelveCommand, args, err); err != nil {
+		return fmt.Errorf("shelve %s: %w", name, err)
+	}
+	return nil
+}
+
+func (s *SVNService) Unshelve(ctx context.Context, wc, name string) error {
+	args, err := svn.UnshelveArgs(name)
+	if _, err := s.run(ctx, wc, svn.UnshelveCommand, args, err); err != nil {
+		return fmt.Errorf("unshelve %s: %w", name, err)
+	}
+	return nil
+}
+
+func (s *SVNService) Shelves(ctx context.Context, wc string) ([]string, error) {
+	out, err := s.runner.Run(ctx, wc, svn.ShelfListCommand)
+	if err != nil {
+		return nil, fmt.Errorf("list shelves: %w", err)
+	}
+	return svn.ParseShelfList(out), nil
+}
+
+// Help with an empty subcommand lists every command.
+func (s *SVNService) Help(ctx context.Context, subcommand string) (string, error) {
+	var args []string
+	if subcommand != "" {
+		if strings.HasPrefix(subcommand, "-") {
+			return "", fmt.Errorf("help topic %q: %w", subcommand, svn.ErrInvalidRequest)
+		}
+		args = []string{subcommand}
+	}
+	out, err := s.runner.Run(ctx, "", "help", args...)
+	if err != nil {
+		return "", fmt.Errorf("help: %w", err)
+	}
+	return string(out), nil
 }
