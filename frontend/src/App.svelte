@@ -19,6 +19,7 @@
     TrustService,
     failureCode,
     type ExplorerStatus,
+    type Launch,
     type ServerCert,
     type Server,
     type Setup,
@@ -779,8 +780,10 @@
     modal = "help";
   }
 
-  // A folder from Explorer's "Open with svnch" may not be a working copy yet; then it is where a checkout goes.
-  async function openStart(dir: string) {
+  // An Explorer entry starts svnch with what to do and where. A folder that is not a working copy yet is where a
+  // checkout goes, whatever the entry was.
+  async function openStart(l: Launch) {
+    const dir = l.isDir ? l.path : l.path.replace(/[\\/][^\\/]*$/, "");
     try {
       await svn.Info(dir);
     } catch (e) {
@@ -790,6 +793,29 @@
       }
     }
     await openWC(dir);
+    if (!wc) return;
+    const inside = (p: string) => p === l.path || (p.startsWith(l.path) && /[\\/]/.test(p[l.path.length]));
+    switch (l.action) {
+      case "update": {
+        const rev = await run("Updating", () => svn.Update([l.path]));
+        if (rev === failed) return;
+        await refresh();
+        await reloadInfo();
+        notice = `At revision ${rev}.`;
+        break;
+      }
+      case "commit":
+        checked.clear();
+        entries.filter((e) => hasChanges(e) && inside(e.path)).forEach((e) => checked.add(e.path));
+        commitBox?.focus();
+        break;
+      case "log":
+        await openLog(l.path);
+        break;
+      case "diff":
+        await showDiff(l.path);
+        break;
+    }
   }
 
   async function openSettings() {
@@ -907,11 +933,11 @@
     loadServers();
     await checkSvn();
     if (svnMissing) return;
-    let start = "";
+    let start: Launch | null = null;
     try {
-      start = await AppService.StartFolder();
+      start = await AppService.Launch();
     } catch {}
-    if (start) return openStart(start);
+    if (start?.path) return openStart(start);
     let last = "";
     try {
       last = localStorage.getItem(LAST_WC) ?? "";
@@ -1204,7 +1230,7 @@
       <div class="setting">
         <div>
           <b>Explorer</b>
-          <p class="muted">"Open with svnch" when you right-click a folder. On Windows 11 it is under "Show more options".</p>
+          <p class="muted">An svnch menu when you right-click a folder or file: Update, Commit, Show log, Diff. On Windows 11 it is under "Show more options".</p>
         </div>
         <button onclick={toggleExplorer}>{explorerMenu.enabled ? "Remove from menu" : "Add to menu"}</button>
       </div>

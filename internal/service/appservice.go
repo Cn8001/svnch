@@ -1,17 +1,20 @@
 package service
 
-import "github.com/Cn8001/svnch/internal/appinfo"
+import (
+	"github.com/Cn8001/svnch/internal/appinfo"
+	"github.com/Cn8001/svnch/internal/explorer"
+)
 
 type AppService struct {
-	info  appinfo.Info
-	start string
+	info   appinfo.Info
+	launch explorer.Launch
 }
 
-// NewAppService takes start, the folder svnch was launched with, as Explorer's "Open with svnch" does.
-func NewAppService(info appinfo.Info, start string) *AppService {
-	return &AppService{info: info.WithBuild(), start: start}
+// NewAppService takes launch, what svnch was started to do, as an Explorer menu entry asks with --action and a path.
+func NewAppService(info appinfo.Info, launch explorer.Launch) *AppService {
+	return &AppService{info: info.WithBuild(), launch: launch}
 }
 
 func (s *AppService) About() appinfo.Info { return s.info }
 
-func (s *AppService) StartFolder() string { return s.start }
+func (s *AppService) Launch() explorer.Launch { return s.launch }

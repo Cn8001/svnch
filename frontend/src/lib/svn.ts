@@ -10,7 +10,7 @@ export {
   TrustService,
 } from "../../bindings/github.com/Cn8001/svnch/internal/service";
 export type { Server } from "../../bindings/github.com/Cn8001/svnch/internal/servers";
-export type { Status as ExplorerStatus } from "../../bindings/github.com/Cn8001/svnch/internal/explorer";
+export type { Status as ExplorerStatus, Launch } from "../../bindings/github.com/Cn8001/svnch/internal/explorer";
 export * from "../../bindings/github.com/Cn8001/svnch/internal/svn";
 export type { Info as AppInfo } from "../../bindings/github.com/Cn8001/svnch/internal/appinfo";
 

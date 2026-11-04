@@ -14,8 +14,8 @@ add, delete, revert and rename from a right-click; read the log; merge and
 shelve. Saved servers and a repository browser mean you never type a URL
 twice; give a server's address and pick from the repositories on it.
 
-On Windows, Settings can add "Open with svnch" to the right-click menu of
-folders.
+On Windows, Settings can add an svnch menu to the right-click menu of folders
+and files: update, commit, log and diff from Explorer.
 
 
 ## Building

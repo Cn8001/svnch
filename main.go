@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/Cn8001/svnch/internal/appinfo"
@@ -98,7 +97,7 @@ func main() {
 			application.NewServiceWithOptions(service.NewServerService(store), failures),
 			application.NewServiceWithOptions(service.NewTrustService(svnConfig), failures),
 			application.NewServiceWithOptions(service.NewSetupService(binary, installErr), failures),
-			application.NewServiceWithOptions(service.NewAppService(about, startFolder(os.Args[1:])), failures),
+			application.NewServiceWithOptions(service.NewAppService(about, explorer.ParseLaunch(os.Args[1:], os.Stat)), failures),
 			application.NewServiceWithOptions(service.NewExplorerService(menu), failures),
 			application.NewServiceWithOptions(updates, failures),
 		},
@@ -134,23 +133,6 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
-}
-
-// startFolder takes the first argument that is a folder, so "svnch ." and Explorer's "Open with svnch" both work and
-// flags a launcher adds are ignored.
-func startFolder(args []string) string {
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
-			continue
-		}
-		if st, err := os.Stat(a); err == nil && st.IsDir() {
-			if abs, err := filepath.Abs(a); err == nil {
-				return abs
-			}
-			return a
-		}
-	}
-	return ""
 }
 
 func initUpdater(app *application.App, version string) error {
