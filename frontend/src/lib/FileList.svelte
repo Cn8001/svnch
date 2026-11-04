@@ -11,7 +11,7 @@
     ontoggle,
     onlythese,
     oncontext,
-    onlistcontext,
+    ongroupcontext,
   }: {
     wc: string;
     entries: StatusEntry[];
@@ -21,8 +21,10 @@
     ontoggle: (path: string) => void;
     onlythese: (paths: string[]) => void; // Ctrl+click on a box: select just this file, folder or group
     oncontext: (path: string, e: MouseEvent) => void; // a folder row with no change of its own passes its folder path
-    onlistcontext: (name: string, paths: string[], e: MouseEvent) => void; // right-click on a changelist's own row
+    ongroupcontext: (group: Group, e: MouseEvent) => void; // right-click on a group's own row, for all of its changes
   } = $props();
+
+  export type Group = { kind: "changes" | "unversioned" | "ignored" | "changelist"; name: string; paths: string[] };
 
   type Node = { name: string; key: string; abs: string; entry?: StatusEntry; children: Map<string, Node> };
   type Row =
@@ -222,7 +224,8 @@
   function context(r: Row, ev: MouseEvent) {
     ev.preventDefault();
     if (r.kind === "group") {
-      if (r.changelist) onlistcontext(r.changelist, r.under.map((e) => e.path), ev);
+      const kind = r.changelist ? "changelist" : (r.key.slice(2) as Group["kind"]);
+      ongroupcontext({ kind, name: r.changelist || r.label, paths: r.under.map((e) => e.path) }, ev);
       return;
     }
     const path = r.node.entry?.path ?? r.node.abs;
@@ -250,7 +253,7 @@
         <div
           class="row group"
           class:cl={!!r.changelist}
-          title={r.changelist ? "Changelist; right-click for its actions" : undefined}
+          title="Right-click for what applies to all of these"
           role="treeitem"
           aria-selected="false"
           aria-expanded={!collapsed.has(r.key)}

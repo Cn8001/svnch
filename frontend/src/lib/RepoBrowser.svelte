@@ -401,7 +401,8 @@
     padding: 5px 8px;
   }
   .srv:hover:not(:disabled), .row:hover:not(:disabled) { background: var(--hover); }
-  .srv span { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+  .srv b, .srv span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srv span { font-size: 12px; }
   .sel, .sel:hover:not(:disabled) { background: var(--accent-soft) !important; box-shadow: inset 2px 0 0 var(--accent); }
   .tools { display: flex; gap: 6px; flex-wrap: wrap; }
   .tools.end { align-items: center; }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import Modal from "../Modal.svelte";
   import { svn, relative, type LogEntry } from "../svn";
   import { failed, useSession } from "../session.svelte";
@@ -7,6 +7,9 @@
 
   let { target, purpose = "" }: { target: string; purpose?: string } = $props();
   const s = useSession();
+  // Kept from when the window opened: the props come from the open dialog, which is gone once the window closes, and
+  // the work below goes on after that.
+  const where = untrack(() => target);
   const a = useActions();
   let entries = $state<LogEntry[]>([]);
   let loading = $state(true);
@@ -14,8 +17,13 @@
   let chosen = $derived(entries[selected]);
   let local = $derived(!!s.wc && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target) && !target.startsWith("^/"));
 
+  // A working copy path is read through its url: svn log on the path stops at the revision the folder is at, which
+  // right after a commit is behind it, so the commit just made would be missing. The path is the fallback, for an
+  // item the server no longer has.
   onMount(async () => {
-    const r = await s.run("Reading log", () => svn.Log({ target, limit: 200, verbose: true }), target);
+    const url = local ? s.urlOf(where) : where;
+    let r = await s.run("Reading log", () => svn.Log({ target: url, limit: 200, verbose: true }), url);
+    if (r === failed && url !== where) r = await s.run("Reading log", () => svn.Log({ target: where, limit: 200, verbose: true }), where);
     loading = false;
     if (r !== failed) entries = r ?? [];
   });
@@ -51,7 +59,7 @@
       <span class="grow"></span>
     {/if}
     <button onclick={s.close}>Close</button>
-    <button class="primary" disabled={!chosen} onclick={() => { const rev = chosen.revision; s.close(); s.showRevisionDiff(target, rev); }}>Show diff</button>
+    <button class="primary" disabled={!chosen} onclick={() => { const rev = chosen.revision; s.close(); s.showRevisionDiff(local ? s.urlOf(where) : where, rev); }}>Show diff</button>
   {/snippet}
 </Modal>
 

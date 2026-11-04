@@ -24,7 +24,9 @@
     if (!co.url || !co.path || !Number.isInteger(rev) || rev < 0) return;
     s.close();
     const req: CheckoutRequest = { url: co.url.trim(), path: co.path.trim(), revision: rev, depth: co.depth };
-    const r = await s.run(`Checking out ${req.url}`, () => svn.Checkout(req), req.url);
+    // Counting first gives the bar a total, and asks for a login or a certificate before the long part starts.
+    const total = await s.run("Counting files", () => svn.CountFiles(req.url), req.url);
+    const r = await s.run(`Checking out ${req.url}`, () => svn.Checkout(req), req.url, total === failed ? 0 : total);
     if (r === failed) {
       // svn can fail at the very end (an external, a warning it counts as an error) after the working copy is
       // complete; open what is there, and leave the error in the status bar.

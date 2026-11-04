@@ -188,3 +188,33 @@ func TestCommandError_LockedWorkingCopyNeedsCleanup(t *testing.T) {
 		t.Errorf("errors.Is(ErrNeedsCleanup) = false for %q", stderr)
 	}
 }
+
+func TestExecRunner_ReportsProgressWhileKeepingOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as svn")
+	}
+	// Arrange
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "svn")
+	script := "#!/bin/sh\nprintf 'A    a.txt\\nA    b.txt\\nUpdated to revision 2.\\n'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := NewExecRunner(fake)
+	var last Progress
+	r.OnProgress(func(p Progress) { last = p })
+
+	// Act
+	out, err := r.Run(context.Background(), "", "update", "--", "/wc")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rev, _ := ParseUpdate(out); rev != 2 {
+		t.Errorf("output = %q", out)
+	}
+	if last.Items != 2 || last.Item != "b.txt" || last.Command != "update" {
+		t.Errorf("progress = %+v", last)
+	}
+}

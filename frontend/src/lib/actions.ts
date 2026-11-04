@@ -17,7 +17,7 @@ export class Actions {
   commit = async () => {
     const s = this.s;
     if (!s.canCommit) return;
-    const up = await s.run("Updating before commit", () => svn.Update([s.wc]));
+    const up = await s.run("Updating before commit", () => svn.Update([s.wc]), "", await this.incoming(s.wc));
     if (up === failed) return;
     await s.refresh();
     await s.reloadInfo();
@@ -37,7 +37,8 @@ export class Actions {
       return e && !isVersioned(e);
     });
     if (toAdd.length && (await s.run("Adding new files", () => svn.Add(toAdd))) === failed) return;
-    const rev = await s.run("Committing", () => svn.Commit({ paths: sel.length ? sel : [s.wc], message: s.message }));
+    const total = sel.length || s.entries.filter(hasChanges).length;
+    const rev = await s.run("Committing", () => svn.Commit({ paths: sel.length ? sel : [s.wc], message: s.message }), "", total);
     if (rev === failed) return;
     s.message = "";
     s.checked.clear();
@@ -49,12 +50,23 @@ export class Actions {
   update = async (paths?: string[]) => {
     const s = this.s;
     if (!s.wc || s.busy) return;
-    const rev = await s.run("Updating", () => svn.Update(paths ?? [s.wc]));
+    const target = paths ?? [s.wc];
+    const rev = await s.run("Updating", () => svn.Update(target), "", await this.incoming(target[0]));
     if (rev === failed) return;
     await s.refresh();
     await s.reloadInfo();
     const n = s.conflicts.length;
     s.notice = n ? `At revision ${rev}, with ${n} conflicting ${n === 1 ? "file" : "files"}.` : `At revision ${rev}.`;
+  };
+
+  // incoming asks the server how many items an update would bring, for the progress bar's total. It is only a total:
+  // when the server cannot be asked, the update itself says why, so the error here is dropped.
+  private incoming = async (path: string): Promise<number> => {
+    try {
+      return await svn.Incoming(path);
+    } catch {
+      return 0;
+    }
   };
 
   add = async (paths: string[]) => {
@@ -194,6 +206,8 @@ export class Actions {
       `svnch applies the opposite of r${e.revision} to ${what}:\n\n  ${firstLine(e)}\n\nNothing changes on the server until you commit it. If later commits touched the same lines, those files show as conflicted.`,
       "Undo",
       async () => {
+        // svn merges only into a working copy at one revision, which it is not right after a commit; update first.
+        if ((await s.run("Updating before undo", () => svn.Update([s.wc]), "", await this.incoming(s.wc))) === failed) return;
         const r = await s.run(`Undoing r${e.revision}`, () => svn.Merge({ source: s.urlOf(target), target, change: -e.revision, dryRun: false }));
         if (r === failed) return;
         if (!s.message.trim()) s.message = `Undo r${e.revision}: ${firstLine(e)}`;

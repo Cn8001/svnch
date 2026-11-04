@@ -16,7 +16,7 @@ func TestArgs_Builders(t *testing.T) {
 		"update":            {func() ([]string, error) { return UpdateArgs("/wc") }, []string{"--", "/wc"}},
 		"commit":            {func() ([]string, error) { return CommitArgs(CommitRequest{Paths: []string{"/wc/a"}, Message: "fix"}) }, []string{"-m", "fix", "--", "/wc/a"}},
 		"add":               {func() ([]string, error) { return AddArgs("/wc/new/a") }, []string{"--parents", "--", "/wc/new/a"}},
-		"delete":            {func() ([]string, error) { return DeleteArgs(false, "/wc/a") }, []string{"--", "/wc/a"}},
+		"delete":            {func() ([]string, error) { return DeleteArgs(false, "/wc/a") }, []string{"--force", "--", "/wc/a"}},
 		"delete keep local": {func() ([]string, error) { return DeleteArgs(true, "/wc/a") }, []string{"--keep-local", "--", "/wc/a"}},
 		"revert":            {func() ([]string, error) { return RevertArgs("/wc/a") }, []string{"--depth", "infinity", "--", "/wc/a"}},
 		"move":              {func() ([]string, error) { return MoveArgs("/wc/a", "/wc/b") }, []string{"--", "/wc/a", "/wc/b"}},

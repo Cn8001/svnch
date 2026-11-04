@@ -17,7 +17,9 @@ func DeleteArgs(keepLocal bool, paths ...string) ([]string, error) {
 	if keepLocal {
 		return append([]string{"--keep-local"}, t...), nil
 	}
-	return t, nil
+	// --force because svn refuses to delete a file with local edits, and the person has already confirmed that
+	// the files go from disk.
+	return append([]string{"--force"}, t...), nil
 }
 
 // Revert goes to infinity depth because svn refuses a plain revert of an added folder.

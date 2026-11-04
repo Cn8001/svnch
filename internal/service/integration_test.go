@@ -191,6 +191,21 @@ func TestIntegration_EverySVNServiceMethod(t *testing.T) {
 	w.unlocked(wc, "diff, log and blame")
 	w.unlocked(other, "diff, log and blame")
 
+	t.Run("progress totals", func(t *testing.T) {
+		n, err := w.s.Incoming(ctx, other)
+		w.must(err, "incoming")
+		if n < 2 {
+			t.Errorf("incoming = %d, want the two committed files", n)
+		}
+		files, err := w.s.CountFiles(ctx, trunk)
+		w.must(err, "count")
+		if files != 3 {
+			t.Errorf("count = %d, want README.txt, src/ and src/main.go", files)
+		}
+	})
+	w.unlocked(wc, "progress totals")
+	w.unlocked(other, "progress totals")
+
 	t.Run("update and conflict", func(t *testing.T) {
 		rev, err := w.s.Update(ctx, []string{other})
 		w.must(err, "update other")

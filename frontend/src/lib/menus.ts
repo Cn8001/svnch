@@ -2,6 +2,7 @@ import { Application, Browser, Clipboard } from "@wailsio/runtime";
 import { hasChanges, isVersioned, type LogEntry, type MenuItem, type StatusEntry } from "./svn";
 import { baseName, parentOf, type Session } from "./session.svelte";
 import type { Actions } from "./actions";
+import type { Group } from "./FileList.svelte";
 
 export const REPO_URL = "https://github.com/Cn8001/svnch";
 
@@ -44,21 +45,45 @@ export function fileItems(s: Session, a: Actions, path: string): MenuItem[] {
   ];
 }
 
-export function changelistItems(s: Session, a: Actions, name: string, paths: string[]): MenuItem[] {
-  return [
-    {
-      label: "Commit this changelist...",
-      action: () => {
-        a.selectOnly(paths);
-        if (!s.message.trim()) s.message = `${name}: `;
-        s.commitBox?.focus();
-      },
+// groupItems is the right-click menu of a group's own row in the changes tree, acting on everything in that group.
+export function groupItems(s: Session, a: Actions, g: Group): MenuItem[] {
+  const n = ` (${g.paths.length})`;
+  const commitThese = {
+    label: "Commit these..." + n,
+    action: () => {
+      a.selectOnly(g.paths);
+      if (g.kind === "changelist" && !s.message.trim()) s.message = `${g.name}: `;
+      s.commitBox?.focus();
     },
-    { label: "Select only these", action: () => a.selectOnly(paths) },
-    { separator: true },
-    { label: "Rename...", action: () => s.show({ kind: "changelist", paths }) },
-    { label: "Dissolve changelist", action: () => a.leaveChangelist(paths) },
-  ];
+  };
+  const selectThese = { label: "Select only these", action: () => a.selectOnly(g.paths) };
+  switch (g.kind) {
+    case "unversioned":
+      return [
+        { label: "Add all" + n, action: () => a.add(g.paths) },
+        { label: "Add all and commit..." + n, action: async () => { await a.add(g.paths); commitThese.action(); } },
+        { separator: true },
+        { label: "Add all to ignore list" + n, action: () => a.ignore(g.paths) },
+        { label: "Delete all from disk..." + n, action: () => a.discard(g.paths) },
+      ];
+    case "ignored":
+      return [{ label: "Add anyway" + n, action: () => a.add(g.paths) }];
+    default:
+      return [
+        commitThese,
+        selectThese,
+        { separator: true },
+        { label: "Discard changes..." + n, action: () => a.discard(g.paths) },
+        { label: "Create patch..." + n, action: () => a.createPatch(g.paths) },
+        { separator: true },
+        ...(g.kind === "changelist"
+          ? [
+              { label: "Rename changelist...", action: () => s.show({ kind: "changelist", paths: g.paths }) },
+              { label: "Dissolve changelist", action: () => a.leaveChangelist(g.paths) },
+            ]
+          : [{ label: "Move to changelist..." + n, action: () => s.show({ kind: "changelist", paths: g.paths.filter((p) => { const e = s.entry(p); return e && isVersioned(e); }) }) }]),
+      ];
+  }
 }
 
 export function historyItems(s: Session, a: Actions, e: LogEntry): MenuItem[] {

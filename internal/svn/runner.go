@@ -35,6 +35,7 @@ type ExecRunner struct {
 	mu       sync.Mutex
 	username string
 	password string
+	progress func(Progress) // told how far each command has come, while it runs
 }
 
 func NewExecRunner(binary string) *ExecRunner {
@@ -63,6 +64,13 @@ func (r *ExecRunner) SetCredentials(username, password string) {
 	r.username, r.password = username, password
 }
 
+// OnProgress hands every command's progress to report, which the app passes on to the window.
+func (r *ExecRunner) OnProgress(report func(Progress)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.progress = report
+}
+
 func (r *ExecRunner) Credentials() (username, password string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -83,7 +91,7 @@ func (r *ExecRunner) Mucc(ctx context.Context, args ...string) ([]byte, error) {
 func (r *ExecRunner) exec(ctx context.Context, binary, dir, what string, lead, args []string) ([]byte, error) {
 	full := append(lead, "--non-interactive")
 	r.mu.Lock()
-	username, password := r.username, r.password
+	username, password, report := r.username, r.password, r.progress
 	r.mu.Unlock()
 	if username != "" {
 		// The password goes through stdin so it never shows in the process list.
@@ -102,9 +110,19 @@ func (r *ExecRunner) exec(ctx context.Context, binary, dir, what string, lead, a
 	// shelving commands (x-shelve and the rest) when SVN_EXPERIMENTAL_COMMANDS names the shelf3 version.
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "SVN_EXPERIMENTAL_COMMANDS=shelf3")
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	var stdout interface{ Bytes() []byte }
+	if report != nil {
+		w := newProgressWriter(what, report)
+		defer w.done()
+		cmd.Stdout = w
+		stdout = &w.out
+	} else {
+		buf := &bytes.Buffer{}
+		cmd.Stdout = buf
+		stdout = buf
+	}
 
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {

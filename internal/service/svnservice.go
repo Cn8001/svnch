@@ -195,6 +195,29 @@ func (s *SVNService) Export(ctx context.Context, url, dest string) error {
 	return nil
 }
 
+// Incoming is how many items an update would bring, so the progress bar has a total; it asks the server only.
+func (s *SVNService) Incoming(ctx context.Context, wc string) (int, error) {
+	args, err := svn.IncomingArgs(wc)
+	out, err := s.run(ctx, "", "status", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("incoming for %s: %w", wc, err)
+	}
+	return svn.ParseIncoming(out)
+}
+
+// CountFiles is how many files and folders a checkout of url would add, the progress bar's total. A big repository
+// can take long to list, so it gives up after twenty seconds and the bar counts without a total.
+func (s *SVNService) CountFiles(ctx context.Context, url string) (int, error) {
+	ctx, stop := context.WithTimeout(ctx, 20*time.Second)
+	defer stop()
+	args, err := svn.CountArgs(url)
+	out, err := s.run(ctx, "", "list", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("count %s: %w", url, err)
+	}
+	return svn.ParseCount(out), nil
+}
+
 // Commit returns 0 when there was nothing to commit.
 func (s *SVNService) Commit(ctx context.Context, req svn.CommitRequest) (int64, error) {
 	args, err := svn.CommitArgs(req)

@@ -109,6 +109,8 @@ func main() {
 		},
 	})
 
+	runner.OnProgress(func(p svn.Progress) { app.Event.Emit("svn:progress", p) })
+
 	// An updater that cannot start is not a reason to stop the app.
 	if err := initUpdater(app, about.Version); err != nil {
 		slog.Error("updater", "error", err)

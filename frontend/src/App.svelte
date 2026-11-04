@@ -8,11 +8,14 @@
   import ContextMenu from "./lib/ContextMenu.svelte";
   import SvnMissing from "./lib/SvnMissing.svelte";
   import DialogHost from "./lib/dialogs/DialogHost.svelte";
+  import StatusBar from "./lib/StatusBar.svelte";
+  import Splitter from "./lib/Splitter.svelte";
+  import { Events } from "@wailsio/runtime";
   import { relative } from "./lib/svn";
   import { Session, provideSession, baseName, parentOf } from "./lib/session.svelte";
   import { Actions, provideActions } from "./lib/actions";
   import { Theme, provideTheme } from "./lib/theme.svelte";
-  import { fileItems, changelistItems, historyItems, wcItems, projectItems, menuBar } from "./lib/menus";
+  import { fileItems, groupItems, historyItems, wcItems, projectItems, menuBar } from "./lib/menus";
 
   const s = new Session();
   const a = new Actions(s);
@@ -26,6 +29,25 @@
   });
 
   let menus = $derived(menuBar(s, a));
+
+  // The panes' sizes are a per-person preference, kept in this browser storage and nowhere else.
+  function stored(key: string, fallback: number): number {
+    try {
+      const v = Number(localStorage.getItem(key));
+      return Number.isFinite(v) && v > 0 ? v : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function keep(key: string, v: number) {
+    try {
+      localStorage.setItem(key, String(Math.round(v)));
+    } catch {}
+  }
+  let width = $state(window.innerWidth);
+  let leftWidth = $state(stored("svnch.leftWidth", Math.round(window.innerWidth * 0.36)));
+  let commitHeight = $state(stored("svnch.commitHeight", 150));
+  let leftShown = $derived(Math.max(260, Math.min(width - 320, leftWidth)));
   let commitLabel = $derived(s.checked.size ? `Commit ${s.checked.size} selected` : "Commit all changes");
 
   function popup(e: MouseEvent, items: ReturnType<typeof wcItems>) {
@@ -58,10 +80,13 @@
     }
   }
 
-  onMount(a.start);
+  onMount(() => {
+    a.start();
+    return Events.On("svn:progress", (e) => s.onProgress(e.data as { command: string; items: number; item: string }));
+  });
 </script>
 
-<svelte:window onkeydown={onKey} oncontextmenu={(e) => e.preventDefault()} />
+<svelte:window bind:innerWidth={width} onkeydown={onKey} oncontextmenu={(e) => e.preventDefault()} />
 
 <div class="app">
   <MenuBar {menus} />
@@ -110,7 +135,7 @@
       {/if}
     </div>
   {:else}
-    <main>
+    <main style:grid-template-columns="{leftShown}px auto minmax(0, 1fr)">
       <section class="left">
         {#if s.conflicts.length}
           <div class="banner">
@@ -128,14 +153,16 @@
             ontoggle={(p) => (s.checked.has(p) ? s.checked.delete(p) : s.checked.add(p))}
             onlythese={a.selectOnly}
             oncontext={(p, e) => popup(e, fileItems(s, a, p))}
-            onlistcontext={(name, paths, e) => popup(e, changelistItems(s, a, name, paths))}
+            ongroupcontext={(g, e) => popup(e, groupItems(s, a, g))}
           />
         </div>
-        <form class="commit" onsubmit={(e) => { e.preventDefault(); a.commit(); }}>
+        <Splitter vertical after size={commitHeight} min={90} max={480} onresize={(h) => { commitHeight = h; keep("svnch.commitHeight", h); }} />
+        <form class="commit" style:height="{commitHeight}px" onsubmit={(e) => { e.preventDefault(); a.commit(); }}>
           <textarea bind:value={s.message} bind:this={s.commitBox} placeholder="Commit message" rows="4"></textarea>
           <button class="primary" type="submit" disabled={!s.canCommit} title="Updates first, then commits">{commitLabel}</button>
         </form>
       </section>
+      <Splitter size={leftShown} min={260} max={width - 320} onresize={(w) => { leftWidth = w; keep("svnch.leftWidth", w); }} />
       <section class="right">
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected={s.pane === "diff"} class:on={s.pane === "diff"} onclick={() => s.showPane("diff")}>Diff</button>
@@ -162,16 +189,7 @@
     </main>
   {/if}
 
-  <footer class="status">
-    {#if s.busy}
-      <span>{s.busy}...</span>
-      {#if s.cancelBusy}<button class="small" onclick={s.cancelBusy}>Cancel</button>{/if}
-    {:else if s.error}
-      <button class="link error" title="Show the full message" onclick={a.showError}>{s.error}</button>
-    {:else}
-      <span>{s.notice || (s.wc ? "Ready." : "")}</span>
-    {/if}
-  </footer>
+  <StatusBar />
 </div>
 
 {#if s.ctxMenu}
@@ -188,10 +206,11 @@
   .where { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; cursor: default; padding: 2px 4px 2px 8px; border-radius: var(--radius); }
   .where:hover { background: var(--hover); }
   .where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .project { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-weight: 600; max-width: 28ch; }
+  .project { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-weight: 600; max-width: 28ch; min-width: 0; flex: 0 1 auto; }
   .project .folder { flex: none; color: var(--blue); }
   .project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .branch { border: 0; background: transparent; padding: 1px 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .branch { min-width: 0; border: 0; background: transparent; padding: 1px 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .rev { flex: none; }
   .branch:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .rev { padding: 1px 8px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-family: var(--mono); font-size: 12px; font-weight: 700; }
 
@@ -204,12 +223,13 @@
   .recent button:hover:not(:disabled) { background: var(--hover); border-color: var(--line); }
   .recent span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
 
-  main { display: grid; grid-template-columns: minmax(300px, 36%) 1fr; min-height: 0; }
-  .left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
+  main { display: grid; min-height: 0; }
+  .left { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); }
   .files { flex: 1; min-height: 0; }
   .banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--del-bg); color: var(--del-ink); border-bottom: 1px solid var(--line); font-size: 12px; }
   .banner button { color: var(--text); }
-  .commit { display: grid; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  .commit { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; padding: 10px; flex: none; }
+  .commit textarea { min-height: 0; }
   .commit button { padding: 6px 12px; }
   .right { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; background: var(--bg); }
   .pane { display: grid; min-height: 0; overflow: hidden; }
@@ -218,9 +238,4 @@
   .tabs button:hover:not(:disabled) { background: transparent; color: var(--text); }
   .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 
-  /* Above the modal backdrop, so Cancel is reachable while a window is open. */
-  .status { position: relative; z-index: 45; display: flex; align-items: center; gap: 10px; min-height: 26px; padding: 2px 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted); }
-  .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .link { border: 0; background: transparent; padding: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .link:hover:not(:disabled) { background: transparent; text-decoration: underline; }
 </style>

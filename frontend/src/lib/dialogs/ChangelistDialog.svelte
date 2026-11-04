@@ -1,23 +1,27 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import Modal from "../Modal.svelte";
   import { svn } from "../svn";
   import { failed, useSession } from "../session.svelte";
 
   let { paths }: { paths: string[] } = $props();
   const s = useSession();
+  // Kept from when the window opened: the props come from the open dialog, which is gone once the window closes, and
+  // the work below goes on after that.
+  const files = untrack(() => paths);
   let name = $state("");
 
   async function move(to: string) {
     const target = to.trim();
     if (!target) return;
     s.close();
-    if ((await s.run(`Moving to ${target}`, () => svn.SetChangelist(target, paths))) === failed) return;
+    if ((await s.run(`Moving to ${target}`, () => svn.SetChangelist(target, files))) === failed) return;
     await s.refresh();
   }
 </script>
 
 <Modal title="Move to changelist" onclose={s.close}>
-  <p class="muted">{paths.length} {paths.length === 1 ? "file" : "files"}. A changelist groups changes so you can commit them on their own; svn forgets it once they are committed.</p>
+  <p class="muted">{files.length} {files.length === 1 ? "file" : "files"}. A changelist groups changes so you can commit them on their own; svn forgets it once they are committed.</p>
   {#if s.changelists.length}
     <div class="row wrap">
       {#each s.changelists as cl}<button onclick={() => move(cl)}>{cl}</button>{/each}

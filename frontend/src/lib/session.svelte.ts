@@ -94,6 +94,7 @@ export class Session {
   blame = $state({ target: "", lines: [] as BlameLine[], loading: false });
 
   busy = $state("");
+  progress = $state({ done: 0, total: 0, item: "", started: 0, command: "" });
   cancelBusy = $state<(() => void) | null>(null);
   notice = $state("");
   error = $state("");
@@ -122,12 +123,14 @@ export class Session {
 
   // Every svn call goes through here so the status bar, the cancel button, error reporting and the login prompt
   // behave the same. make is called again after a login, so a command that hit a password-protected server carries on.
-  run = async <T>(label: string, make: () => Promise<T> & { cancel?: () => void }, url = ""): Promise<T | Failed> => {
+  // total is how many items the command will handle, when the caller knows, for the progress bar; 0 counts without one.
+  run = async <T>(label: string, make: () => Promise<T> & { cancel?: () => void }, url = "", total = 0): Promise<T | Failed> => {
     let logins = 0;
     let trusts = 0;
     let cleanups = 0;
     for (;;) {
       let cancelled = false;
+      this.progress = { done: 0, total, item: "", started: Date.now(), command: "" };
       const p = make();
       this.busy = label;
       this.error = "";
@@ -178,6 +181,16 @@ export class Session {
       this.busy = label;
     }
   }
+
+  // onProgress takes svn's running count. It follows the first command that reports an item, so a log read in the
+  // background at the same time does not reset the count of the update the bar is showing.
+  onProgress = (p: { command: string; items: number; item: string }) => {
+    if (!this.busy || !p.items) return;
+    if (!this.progress.command) this.progress.command = p.command;
+    if (p.command !== this.progress.command) return;
+    this.progress.done = p.items;
+    this.progress.item = p.item;
+  };
 
   // remote is run for components that want the error text back rather than a sentinel.
   remote = async <T>(label: string, make: () => Promise<T>, url: string): Promise<Result<T>> => {

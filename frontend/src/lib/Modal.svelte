@@ -26,7 +26,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="box" class:wide role="dialog" tabindex="-1" aria-label={title} onclick={(e) => e.stopPropagation()}>
     <header>
-      <span>{title}</span>
+      <span class="title" {title}>{title}</span>
       <button class="x" aria-label="Close" onclick={onclose}>x</button>
     </header>
     <div class="body">{@render children()}</div>
@@ -55,6 +55,7 @@
     overflow: hidden;
   }
   .box.wide { width: min(860px, calc(100vw - 32px)); }
+  header .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   header {
     display: flex;
     justify-content: space-between;
