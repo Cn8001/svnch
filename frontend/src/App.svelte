@@ -10,6 +10,7 @@
   import DialogHost from "./lib/dialogs/DialogHost.svelte";
   import StatusBar from "./lib/StatusBar.svelte";
   import Splitter from "./lib/Splitter.svelte";
+  import ProjectBadge from "./lib/ProjectBadge.svelte";
   import { Events } from "@wailsio/runtime";
   import { relative } from "./lib/svn";
   import { Session, provideSession, baseName, parentOf } from "./lib/session.svelte";
@@ -93,7 +94,11 @@
 
   <div class="toolbar">
     <button class="project" title={s.wc ? `${s.wc}, click to switch to another working copy` : "Open or switch to a working copy"} onclick={(e) => below(e, projectItems(s, a))} disabled={s.svnMissing}>
-      <svg class="folder" viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 3.5h4.5l1.5 1.5h7v8h-13z" fill="currentColor" /></svg>
+      {#if s.wc}
+        <ProjectBadge name={baseName(s.wc)} path={s.wc} />
+      {:else}
+        <svg class="folder" viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 3.5h4.5l1.5 1.5h7v8h-13z" fill="currentColor" /></svg>
+      {/if}
       <span class="pname">{s.wc ? baseName(s.wc) : "No working copy"}</span>
       <svg viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
@@ -129,7 +134,7 @@
       {#if s.recent.length}
         <ul class="recent">
           {#each s.recent as p (p)}
-            <li><button onclick={() => s.openWC(p)} disabled={!!s.busy} title={p}><b>{baseName(p)}</b><span class="muted">{parentOf(p)}</span></button></li>
+            <li><button onclick={() => s.openWC(p)} disabled={!!s.busy} title={p}><ProjectBadge name={baseName(p)} path={p} size={22} /><b>{baseName(p)}</b><span class="muted">{parentOf(p)}</span></button></li>
           {/each}
         </ul>
       {/if}
@@ -219,7 +224,7 @@
   .welcome p { margin: 0; }
   .actions { display: flex; gap: 10px; }
   .recent { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; width: min(520px, 90vw); text-align: left; }
-  .recent button { display: flex; align-items: baseline; gap: 10px; width: 100%; border-color: transparent; background: transparent; padding: 6px 10px; }
+  .recent button { display: flex; align-items: center; gap: 10px; width: 100%; border-color: transparent; background: transparent; padding: 6px 10px; }
   .recent button:hover:not(:disabled) { background: var(--hover); border-color: var(--line); }
   .recent span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
 

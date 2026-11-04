@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { MenuItem } from "./svn";
+  import ProjectBadge from "./ProjectBadge.svelte";
 
   let { x, y, items, onclose }: { x: number; y: number; items: MenuItem[]; onclose: () => void } = $props();
 
@@ -45,7 +46,7 @@
         <button
           disabled={item.disabled}
           onclick={(e) => { e.stopPropagation(); onclose(); item.action(); }}
-        ><span>{item.label}</span>{#if item.hint}<span class="hint">{item.hint}</span>{/if}</button>
+        ><span class="main">{#if item.badge}<ProjectBadge name={item.badge.name} path={item.badge.path} size={16} />{/if}<span>{item.label}</span></span>{#if item.hint}<span class="hint">{item.hint}</span>{/if}</button>
       </li>
     {/if}
   {/each}
@@ -76,6 +77,7 @@
     text-align: left;
   }
   button:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+  .main { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .hint { color: var(--muted); font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button:hover:not(:disabled) .hint { color: inherit; opacity: 0.75; }
   .sep { border-top: 1px solid var(--line); margin: 4px 6px; }

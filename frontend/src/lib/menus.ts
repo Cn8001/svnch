@@ -120,7 +120,7 @@ export function wcItems(s: Session, a: Actions): MenuItem[] {
 // projectItems is the switcher behind the working copy's name in the toolbar.
 export function projectItems(s: Session, a: Actions): MenuItem[] {
   return [
-    ...s.recent.map((p) => ({ label: baseName(p), hint: parentOf(p), action: () => s.openWC(p), disabled: p === s.wc || !!s.busy })),
+    ...s.recent.map((p) => ({ label: baseName(p), hint: parentOf(p), badge: { name: baseName(p), path: p }, action: () => s.openWC(p), disabled: p === s.wc || !!s.busy })),
     ...(s.recent.length ? [{ separator: true as const }] : []),
     { label: "Open working copy...", action: s.openFolder, disabled: !!s.busy },
     { label: "Checkout...", action: () => a.openCheckout(), disabled: !!s.busy },
