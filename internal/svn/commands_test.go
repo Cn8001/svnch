@@ -38,6 +38,11 @@ func TestArgs_Builders(t *testing.T) {
 		"switch":            {func() ([]string, error) { return SwitchArgs("^/branches/x", "/wc") }, []string{"--", "^/branches/x", "/wc"}},
 		"changelist":        {func() ([]string, error) { return ChangelistArgs(" ui ", "/wc/a") }, []string{"ui", "--", "/wc/a"}},
 		"changelist remove": {func() ([]string, error) { return RemoveChangelistArgs("/wc/a") }, []string{"--remove", "--", "/wc/a"}},
+		"remote delete":     {func() ([]string, error) { return RemoteDeleteArgs("Delete x", "https://h/r/x") }, []string{"-m", "Delete x", "--", "https://h/r/x"}},
+		"remote move":       {func() ([]string, error) { return RemoteMoveArgs("https://h/r/a", "https://h/r/b", "Rename") }, []string{"-m", "Rename", "--", "https://h/r/a", "https://h/r/b"}},
+		"mkdir":             {func() ([]string, error) { return MkdirArgs("^/docs", "Add docs") }, []string{"--parents", "-m", "Add docs", "--", "^/docs"}},
+		"cat":               {func() ([]string, error) { return CatArgs("https://h/r/a.txt") }, []string{"--", "https://h/r/a.txt"}},
+		"export":            {func() ([]string, error) { return ExportArgs("https://h/r/a.png", "/tmp/a.png") }, []string{"--force", "--", "https://h/r/a.png", "/tmp/a.png"}},
 		"shelve":            {func() ([]string, error) { return ShelveArgs("wip", "half done") }, []string{"-m", "half done", "--", "wip", "."}},
 		"unshelve":          {func() ([]string, error) { return UnshelveArgs("wip") }, []string{"--", "wip"}},
 	}
@@ -59,19 +64,23 @@ func TestArgs_Builders(t *testing.T) {
 
 func TestArgs_RejectBadRequests(t *testing.T) {
 	cases := map[string]func() ([]string, error){
-		"commit without message": func() ([]string, error) { return CommitArgs(CommitRequest{Paths: []string{"/wc"}, Message: "  "}) },
-		"commit without paths":   func() ([]string, error) { return CommitArgs(CommitRequest{Message: "fix"}) },
-		"add without paths":      func() ([]string, error) { return AddArgs() },
-		"move without target":    func() ([]string, error) { return MoveArgs("/wc/a", "") },
-		"diff negative change":   func() ([]string, error) { return DiffArgs(DiffRequest{Target: "/wc", Change: -1}) },
-		"log negative limit":     func() ([]string, error) { return LogArgs(LogRequest{Target: "/wc", Limit: -1}) },
-		"merge without source":   func() ([]string, error) { return MergeArgs(MergeRequest{Target: "/wc"}) },
-		"shelve without name":    func() ([]string, error) { return ShelveArgs("", "") },
-		"unshelve without name":  func() ([]string, error) { return UnshelveArgs("") },
-		"update to revision 0":   func() ([]string, error) { return UpdateToArgs("/wc", 0) },
-		"branch without message": func() ([]string, error) { return BranchArgs(BranchRequest{From: "^/trunk", To: "^/branches/x"}) },
-		"switch without url":     func() ([]string, error) { return SwitchArgs("", "/wc") },
-		"changelist flag name":   func() ([]string, error) { return ChangelistArgs("--remove", "/wc/a") },
+		"commit without message":        func() ([]string, error) { return CommitArgs(CommitRequest{Paths: []string{"/wc"}, Message: "  "}) },
+		"commit without paths":          func() ([]string, error) { return CommitArgs(CommitRequest{Message: "fix"}) },
+		"add without paths":             func() ([]string, error) { return AddArgs() },
+		"move without target":           func() ([]string, error) { return MoveArgs("/wc/a", "") },
+		"diff negative change":          func() ([]string, error) { return DiffArgs(DiffRequest{Target: "/wc", Change: -1}) },
+		"log negative limit":            func() ([]string, error) { return LogArgs(LogRequest{Target: "/wc", Limit: -1}) },
+		"merge without source":          func() ([]string, error) { return MergeArgs(MergeRequest{Target: "/wc"}) },
+		"shelve without name":           func() ([]string, error) { return ShelveArgs("", "") },
+		"unshelve without name":         func() ([]string, error) { return UnshelveArgs("") },
+		"update to revision 0":          func() ([]string, error) { return UpdateToArgs("/wc", 0) },
+		"branch without message":        func() ([]string, error) { return BranchArgs(BranchRequest{From: "^/trunk", To: "^/branches/x"}) },
+		"switch without url":            func() ([]string, error) { return SwitchArgs("", "/wc") },
+		"changelist flag name":          func() ([]string, error) { return ChangelistArgs("--remove", "/wc/a") },
+		"remote delete of a local path": func() ([]string, error) { return RemoteDeleteArgs("Delete", "/wc/a") },
+		"remote delete without message": func() ([]string, error) { return RemoteDeleteArgs(" ", "https://h/r/x") },
+		"move onto itself":              func() ([]string, error) { return RemoteMoveArgs("https://h/r/a", "https://h/r/a", "m") },
+		"cat of a local path":           func() ([]string, error) { return CatArgs("/wc/a.txt") },
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -258,5 +267,22 @@ func TestParseStatus_ChangelistEntriesCarryTheirList(t *testing.T) {
 	}
 	if len(entries) != 2 || entries[0].Changelist != "" || entries[1].Path != "/wc/b" || entries[1].Changelist != "ui" {
 		t.Errorf("entries = %+v", entries)
+	}
+}
+
+func TestParseCat_NulMeansBinary(t *testing.T) {
+	// Arrange
+	text := []byte("hello\nworld\n")
+	bin := []byte{0x89, 'P', 'N', 'G', 0, 1, 2}
+
+	// Act
+	gotText, gotBin := ParseCat(text), ParseCat(bin)
+
+	// Assert
+	if gotText.Binary || gotText.Text != "hello\nworld\n" {
+		t.Errorf("text = %+v", gotText)
+	}
+	if !gotBin.Binary || gotBin.Text != "" || gotBin.Size != len(bin) {
+		t.Errorf("binary = %+v", gotBin)
 	}
 }

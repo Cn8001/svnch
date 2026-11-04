@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Clipboard } from "@wailsio/runtime";
-  import type { ListEntry, Server } from "./svn";
+  import { Clipboard, Dialogs } from "@wailsio/runtime";
+  import ContextMenu from "./ContextMenu.svelte";
+  import { svn, join, type FileContent, type ListEntry, type MenuItem, type Server } from "./svn";
+
+  type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
   let {
     servers,
@@ -14,6 +17,7 @@
     start = "",
     cancel,
     onlogin,
+    exec,
   }: {
     servers: Server[];
     list: (url: string) => Promise<ListEntry[] | string>; // a string is why it failed
@@ -25,6 +29,7 @@
     onlogin: (url: string) => void;
     start?: string; // a url to open straight away, as from the working copy's "Browse on server"
     cancel: () => void; // stops the svn call that is running, for a server that does not answer
+    exec: <T>(label: string, make: () => Promise<T>, url: string) => Promise<Result<T>>; // runs through the app's login and status bar
   } = $props();
 
   let server = $state<Server | null>(null);
@@ -38,6 +43,13 @@
   let editing = $state("");
   let checked = $state<{ ok: boolean; text: string } | null>(null);
   let checking = $state(false);
+  let op = $state<{ kind: "delete" | "rename" | "mkdir"; name: string; message: string; error: string; busy: boolean } | null>(null);
+  let viewer = $state<{ name: string; url: string; content: FileContent | null; error: string } | null>(null);
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  let note = $state("");
+
+  // A file larger than this is offered for saving rather than shown; the viewer is for reading, not for assets.
+  const VIEW_LIMIT = 2 << 20;
 
   let target = $derived(selected ? child(url, selected) : url);
   let canUp = $derived(!!server && !!url && url.replace(/\/+$/, "") !== server.url.replace(/\/+$/, ""));
@@ -59,6 +71,7 @@
     url = to.replace(/\/+$/, "");
     typed = url;
     selected = "";
+    viewer = null;
     entries = r.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1));
   }
 
@@ -108,6 +121,93 @@
       const s = servers.find((x) => x.url === saved);
       if (s) pick(s);
     }
+  }
+
+  function opMessage(): string {
+    if (!op) return "";
+    const name = op.name.trim();
+    return op.kind === "delete" ? `Delete ${selected}` : op.kind === "rename" ? `Rename ${selected} to ${name}` : `Add folder ${name}`;
+  }
+
+  function startOp(kind: "delete" | "rename" | "mkdir", on = selected) {
+    selected = kind === "mkdir" ? selected : on;
+    op = { kind, name: kind === "rename" ? on : "", message: "", error: "", busy: false };
+    note = "";
+  }
+
+  async function runOp() {
+    if (!op || op.busy) return;
+    const name = op.name.trim();
+    const message = op.message.trim() || opMessage();
+    const at = url;
+    op.busy = true;
+    op.error = "";
+    const r =
+      op.kind === "delete"
+        ? await exec(`Deleting ${selected}`, () => svn.DeleteRemote([child(at, selected)], message), at)
+        : op.kind === "rename"
+          ? await exec(`Renaming ${selected}`, () => svn.MoveRemote(child(at, selected), child(at, name), message), at)
+          : await exec(`Creating ${name}`, () => svn.MakeDir(child(at, name), message), at);
+    if (!r.ok) {
+      if (op) {
+        op.busy = false;
+        op.error = r.error;
+      }
+      return;
+    }
+    op = null;
+    await open(at);
+    note = `Done, committed as r${r.value}.`;
+  }
+
+  async function view(e: ListEntry) {
+    const u = child(url, e.name);
+    viewer = { name: e.name, url: u, content: null, error: "" };
+    if (e.size > VIEW_LIMIT) {
+      viewer.content = { text: "", binary: true, size: e.size };
+      return;
+    }
+    const r = await exec(`Opening ${e.name}`, () => svn.Cat(u), u);
+    if (viewer?.url !== u) return;
+    if (r.ok) viewer.content = r.value;
+    else viewer.error = r.error;
+  }
+
+  async function saveAs(u: string, name: string, dir: boolean) {
+    let dest = "";
+    if (dir) {
+      const parent = await Dialogs.OpenFile({ Title: `Export ${name} into`, CanChooseDirectories: true, CanChooseFiles: false, CanCreateDirectories: true, ButtonText: "Export here" });
+      if (typeof parent === "string" && parent) dest = join(parent, name);
+    } else {
+      dest = await Dialogs.SaveFile({ Title: "Save from the repository", Filename: name, ButtonText: "Save", CanCreateDirectories: true });
+    }
+    if (!dest) return;
+    const r = await exec(`Saving ${name}`, () => svn.Export(u, dest), u);
+    note = r.ok ? `Saved to ${dest}` : r.error;
+  }
+
+  function entryItems(e: ListEntry | undefined): MenuItem[] {
+    if (!e) {
+      return [
+        { label: "New folder...", action: () => startOp("mkdir"), disabled: !url },
+        { label: "Copy URL", action: () => Clipboard.SetText(url), disabled: !url },
+        { label: "Refresh", action: () => url && open(url), disabled: !url },
+      ];
+    }
+    const u = child(url, e.name);
+    const dir = e.kind === "dir";
+    return [
+      dir ? { label: "Open folder", action: () => open(u) } : { label: "Open", action: () => view(e) },
+      { label: dir ? "Export..." : "Save as...", action: () => saveAs(u, e.name, dir) },
+      ...(dir ? [{ label: "Checkout...", action: () => oncheckout(u) }] : []),
+      { separator: true },
+      { label: "Copy URL", action: () => Clipboard.SetText(u) },
+      { label: "Show log", action: () => onlog(u) },
+      { separator: true },
+      { label: "Rename / move...", action: () => startOp("rename", e.name) },
+      { label: "Delete...", action: () => startOp("delete", e.name) },
+      { label: "New folder...", action: () => startOp("mkdir") },
+    ];
   }
 
   function size(n: number): string {
@@ -175,7 +275,49 @@
           <button type="submit" disabled={!typed.trim()}>Go</button>
         {/if}
       </form>
-      <div class="table">
+      {#if op}
+        <form class="form op" onsubmit={(e) => { e.preventDefault(); runOp(); }}>
+          <b>{op.kind === "delete" ? `Delete ${selected}` : op.kind === "rename" ? `Rename or move ${selected}` : "New folder"}</b>
+          {#if op.kind === "delete"}
+            <p>Removes <code>{selected}</code> from the server for everyone, in one commit. It stays in the history, so the log can bring it back.</p>
+          {:else}
+            <!-- svelte-ignore a11y_autofocus -->
+            <label><span>{op.kind === "rename" ? "New name (a/b moves it into folder a)" : "Folder name"}</span><input bind:value={op.name} autofocus /></label>
+            {#if op.name.trim()}<p class="muted fine mono">{child(url, op.name.trim())}</p>{/if}
+          {/if}
+          <label><span>Commit message</span><input bind:value={op.message} placeholder={opMessage()} /></label>
+          {#if op.error}<p class="bad">{op.error}</p>{/if}
+          <div class="tools">
+            <span class="grow"></span>
+            <button type="button" onclick={() => (op = null)}>Cancel</button>
+            <button class="primary" type="submit" disabled={op.busy || (op.kind !== "delete" && (!op.name.trim() || op.name.trim() === selected))}>
+              {op.busy ? "Working..." : op.kind === "delete" ? "Delete" : op.kind === "rename" ? "Rename" : "Create"}
+            </button>
+          </div>
+        </form>
+      {:else if viewer}
+        <div class="viewer">
+          <div class="tools vhead">
+            <button onclick={() => (viewer = null)}>Back</button>
+            <b class="where" title={viewer.url}>{viewer.name}</b>
+            {#if viewer.content && !viewer.content.binary}<button onclick={() => viewer?.content && Clipboard.SetText(viewer.content.text)}>Copy</button>{/if}
+            <button onclick={() => viewer && saveAs(viewer.url, viewer.name, false)}>Save as...</button>
+          </div>
+          {#if viewer.error}
+            <p class="bad empty">{viewer.error}</p>
+          {:else if !viewer.content}
+            <p class="muted empty">Opening...</p>
+          {:else if viewer.content.binary}
+            <p class="muted empty">
+              {viewer.content.size > VIEW_LIMIT ? "This file is too large to show here" : "This is not a text file"} ({size(viewer.content.size)}).
+              Save it to open it in its own program.
+            </p>
+          {:else}
+            <pre class="content">{viewer.content.text}</pre>
+          {/if}
+        </div>
+      {:else}
+      <div class="table" role="presentation" oncontextmenu={(ev) => { ev.preventDefault(); menu = { x: ev.clientX, y: ev.clientY, items: entryItems(undefined) }; }}>
         <div class="row hdr"><span>Name</span><span>Size</span><span>Rev</span><span>Author</span><span>Date</span></div>
         <div class="rows">
           {#each entries as e (e.name)}
@@ -183,7 +325,8 @@
               class="row"
               class:sel={selected === e.name}
               onclick={() => (selected = selected === e.name ? "" : e.name)}
-              ondblclick={() => e.kind === "dir" && open(child(url, e.name))}
+              ondblclick={() => (e.kind === "dir" ? open(child(url, e.name)) : view(e))}
+              oncontextmenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); selected = e.name; menu = { x: ev.clientX, y: ev.clientY, items: entryItems(e) }; }}
             >
               <span class="name">{e.name}{e.kind === "dir" ? "/" : ""}</span>
               <span class="muted">{size(e.size)}</span>
@@ -204,15 +347,26 @@
           {/each}
         </div>
       </div>
+      {/if}
+      {#if note}<p class="fine note">{note}</p>{/if}
       <div class="tools end">
         <span class="muted where" title={target}>{target}</span>
         <button disabled={!target} onclick={() => Clipboard.SetText(target)}>Copy URL</button>
         <button disabled={!target} onclick={() => onlog(target)}>Log</button>
+        <button
+          disabled={!url || !!op}
+          onclick={(ev) => {
+            const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+            menu = { x: r.left, y: r.bottom + 4, items: entryItems(entries.find((x) => x.name === selected)) };
+          }}
+        >More...</button>
         <button class="primary" disabled={!target} onclick={() => oncheckout(target)}>Checkout...</button>
       </div>
     {/if}
   </section>
 </div>
+
+{#if menu}<ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />{/if}
 
 <style>
   .browser { display: grid; grid-template-columns: 240px 1fr; gap: 12px; height: 60vh; }
@@ -249,4 +403,11 @@
   .fine { margin: -6px 0 0; font-size: 12px; }
   .bad { color: var(--danger); }
   .grow { flex: 1; }
+  .op { max-width: none; flex: 1; align-content: start; }
+  .op p { margin: 0; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .note { margin: 0; color: var(--muted); overflow-wrap: anywhere; user-select: text; }
+  .viewer { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .vhead { align-items: center; flex-wrap: nowrap; }
+  .content { flex: 1; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); line-height: 1.5; }
 </style>

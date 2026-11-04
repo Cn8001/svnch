@@ -699,6 +699,13 @@
     };
   }
 
+  // remote hands the repository browser the same run as everything else, so its server-side changes get the login
+  // prompt and the status bar, and gives back the error text instead of a sentinel.
+  async function remote<T>(label: string, make: () => Promise<T>, url: string): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+    const r = await run(label, make, url);
+    return r === failed ? { ok: false, error: error || "It did not work." } : { ok: true, value: r };
+  }
+
   async function saveServer(s: Server) {
     try {
       await ServerService.Save(s);
@@ -1266,6 +1273,7 @@
       check={checkServer}
       start={reposAt}
       onlogin={startLogin}
+      exec={remote}
       cancel={() => cancelBusy?.()}
     />
   </Modal>

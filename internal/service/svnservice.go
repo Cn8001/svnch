@@ -146,6 +146,52 @@ func (s *SVNService) RemoveChangelist(ctx context.Context, paths []string) error
 	return nil
 }
 
+// DeleteRemote, MoveRemote and MakeDir change the repository directly; each returns the revision it committed.
+func (s *SVNService) DeleteRemote(ctx context.Context, urls []string, message string) (int64, error) {
+	args, err := svn.RemoteDeleteArgs(message, urls...)
+	out, err := s.run(ctx, "", "delete", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("delete on server: %w", err)
+	}
+	return svn.ParseCommit(out)
+}
+
+func (s *SVNService) MoveRemote(ctx context.Context, from, to, message string) (int64, error) {
+	args, err := svn.RemoteMoveArgs(from, to, message)
+	out, err := s.run(ctx, "", "move", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("move %s on server: %w", from, err)
+	}
+	return svn.ParseCommit(out)
+}
+
+func (s *SVNService) MakeDir(ctx context.Context, url, message string) (int64, error) {
+	args, err := svn.MkdirArgs(url, message)
+	out, err := s.run(ctx, "", "mkdir", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("new folder %s: %w", url, err)
+	}
+	return svn.ParseCommit(out)
+}
+
+// Cat reads a file straight from the repository; the browser only asks for small files, so the whole of it is fine.
+func (s *SVNService) Cat(ctx context.Context, url string) (svn.FileContent, error) {
+	args, err := svn.CatArgs(url)
+	out, err := s.run(ctx, "", "cat", args, err)
+	if err != nil {
+		return svn.FileContent{}, fmt.Errorf("open %s: %w", url, err)
+	}
+	return svn.ParseCat(out), nil
+}
+
+func (s *SVNService) Export(ctx context.Context, url, dest string) error {
+	args, err := svn.ExportArgs(url, dest)
+	if _, err := s.run(ctx, "", "export", args, err); err != nil {
+		return fmt.Errorf("save %s: %w", url, err)
+	}
+	return nil
+}
+
 // Commit returns 0 when there was nothing to commit.
 func (s *SVNService) Commit(ctx context.Context, req svn.CommitRequest) (int64, error) {
 	args, err := svn.CommitArgs(req)

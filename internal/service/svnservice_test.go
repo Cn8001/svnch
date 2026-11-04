@@ -340,3 +340,31 @@ func TestSwitch_ReturnsRevision(t *testing.T) {
 		t.Errorf("got (%d, %v) from %s", rev, err, runner.subcommand)
 	}
 }
+
+func TestDeleteRemote_RefusesLocalPaths(t *testing.T) {
+	// Arrange
+	runner := &fakeRunner{}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	_, err := s.DeleteRemote(context.Background(), []string{"C:\\work\\game"}, "Delete game")
+
+	// Assert
+	if !errors.Is(err, svn.ErrInvalidRequest) || runner.calls != 0 {
+		t.Errorf("err = %v after %d svn calls, want ErrInvalidRequest and none", err, runner.calls)
+	}
+}
+
+func TestMakeDir_ReturnsRevision(t *testing.T) {
+	// Arrange
+	runner := &fakeRunner{out: []byte("\nCommitted revision 7.\n")}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	rev, err := s.MakeDir(context.Background(), "https://h/r/docs", "Add docs")
+
+	// Assert
+	if err != nil || rev != 7 || runner.subcommand != "mkdir" {
+		t.Errorf("got (%d, %v) from %s", rev, err, runner.subcommand)
+	}
+}
