@@ -79,19 +79,28 @@ func main() {
 	if err := menu.Repair(ctx); err != nil {
 		slog.Warn("explorer menu", "error", err)
 	}
-	web := &http.Client{Timeout: 30 * time.Second}
+	svnConfig, err := svn.ConfigDir()
+	if err != nil {
+		slog.Warn("svn config folder unknown, certificates cannot be trusted from svnch", "error", err)
+	}
+	web := &http.Client{Timeout: 30 * time.Second, Transport: svn.TrustingTransport(svnConfig)}
 
+	// Wails 3.0.0 only applies a service's own MarshalError to its bound methods and falls back to its default, which
+	// sends Go errors as {}, not to the application option; so each service carries it, or the webview never sees
+	// the AUTH and CERT codes it branches on.
+	failures := application.ServiceOptions{MarshalError: service.MarshalError}
 	app := application.New(application.Options{
 		Name:         "svnch",
 		Description:  "A Subversion client",
 		MarshalError: service.MarshalError,
 		Services: []application.Service{
-			application.NewService(service.New(runner, runner, web)),
-			application.NewService(service.NewServerService(store)),
-			application.NewService(service.NewSetupService(binary, installErr)),
-			application.NewService(service.NewAppService(about, startFolder(os.Args[1:]))),
-			application.NewService(service.NewExplorerService(menu)),
-			application.NewService(updates),
+			application.NewServiceWithOptions(service.New(runner, runner, web), failures),
+			application.NewServiceWithOptions(service.NewServerService(store), failures),
+			application.NewServiceWithOptions(service.NewTrustService(svnConfig), failures),
+			application.NewServiceWithOptions(service.NewSetupService(binary, installErr), failures),
+			application.NewServiceWithOptions(service.NewAppService(about, startFolder(os.Args[1:])), failures),
+			application.NewServiceWithOptions(service.NewExplorerService(menu), failures),
+			application.NewServiceWithOptions(updates, failures),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -112,7 +121,7 @@ func main() {
 	}
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "svnch",
+		Title:     "svnch Subversion",
 		Width:     1200,
 		Height:    760,
 		MinWidth:  860, // file list and diff still fit side by side

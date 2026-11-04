@@ -9,6 +9,7 @@
     focused,
     onfocus,
     ontoggle,
+    onlythese,
     oncontext,
   }: {
     wc: string;
@@ -17,6 +18,7 @@
     focused: string;
     onfocus: (path: string) => void;
     ontoggle: (path: string) => void;
+    onlythese: (paths: string[]) => void; // Ctrl+click on a box: select just this file, folder or group
     oncontext: (path: string, e: MouseEvent) => void; // a folder row with no change of its own passes its folder path
   } = $props();
 
@@ -171,6 +173,24 @@
     for (const e of under) if (checked.has(e.path) !== on) ontoggle(e.path);
   }
 
+  // The click knows the modifier, the change that follows does the work, so a plain click keeps the browser's own toggle.
+  let exclusive = false;
+
+  function boxClick(ev: MouseEvent) {
+    ev.stopPropagation();
+    exclusive = ev.ctrlKey || ev.metaKey;
+  }
+
+  function boxChange(ev: Event, toggle: () => void, paths: string[]) {
+    if (!exclusive) return toggle();
+    exclusive = false;
+    const box = ev.currentTarget as HTMLInputElement;
+    // The box may already have been on; the browser just turned it off, and the same "on" state would not be re-rendered.
+    box.checked = true;
+    box.indeterminate = false;
+    onlythese(paths);
+  }
+
   function open(r: Row) {
     if (r.kind === "group") toggleOpen(r.key);
     else if (r.kind === "folder") {
@@ -230,8 +250,9 @@
               type="checkbox"
               checked={allIn(r.under)}
               indeterminate={!allIn(r.under) && r.under.some((x) => checked.has(x.path))}
-              onclick={(ev) => ev.stopPropagation()}
-              onchange={() => setAll(r.under)}
+              title="Ctrl+click to select only these"
+              onclick={boxClick}
+              onchange={(ev) => boxChange(ev, () => setAll(r.under), r.under.map((x) => x.path))}
             />
           {/if}
           <span class="name">{r.label}</span>
@@ -262,8 +283,14 @@
               type="checkbox"
               checked={r.kind === "folder" ? allIn(r.under) : !!e && checked.has(e.path)}
               indeterminate={r.kind === "folder" && !allIn(r.under) && r.under.some((x) => checked.has(x.path))}
-              onclick={(ev) => ev.stopPropagation()}
-              onchange={() => (r.kind === "folder" ? setAll(r.under) : e && ontoggle(e.path))}
+              title="Ctrl+click to select only this"
+              onclick={boxClick}
+              onchange={(ev) =>
+                boxChange(
+                  ev,
+                  () => (r.kind === "folder" ? setAll(r.under) : e && ontoggle(e.path)),
+                  r.kind === "folder" ? r.under.map((x) => x.path) : e ? [e.path] : [],
+                )}
             />
           {/if}
           {#if r.kind === "folder"}

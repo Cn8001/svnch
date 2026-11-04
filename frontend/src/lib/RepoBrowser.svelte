@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { Clipboard } from "@wailsio/runtime";
   import type { ListEntry, Server } from "./svn";
 
@@ -10,17 +11,19 @@
     oncheckout,
     onlog,
     check,
+    start = "",
     cancel,
     onlogin,
   }: {
     servers: Server[];
-    list: (url: string) => Promise<ListEntry[] | null>; // null when it failed; the caller already reported why
+    list: (url: string) => Promise<ListEntry[] | string>; // a string is why it failed
     onsave: (s: Server) => Promise<boolean>;
     onremove: (url: string) => Promise<void>;
     oncheckout: (url: string) => void;
     onlog: (url: string) => void;
     check: (url: string, username: string) => Promise<{ ok: boolean; text: string; username: string }>;
     onlogin: (url: string) => void;
+    start?: string; // a url to open straight away, as from the working copy's "Browse on server"
     cancel: () => void; // stops the svn call that is running, for a server that does not answer
   } = $props();
 
@@ -30,6 +33,7 @@
   let entries: ListEntry[] = $state([]);
   let selected = $state("");
   let loading = $state(false);
+  let failure = $state("");
   let form = $state<Server | null>(null);
   let editing = $state("");
   let checked = $state<{ ok: boolean; text: string } | null>(null);
@@ -44,9 +48,14 @@
 
   async function open(to: string) {
     loading = true;
+    failure = "";
     const r = await list(to);
     loading = false;
-    if (r === null) return;
+    if (typeof r === "string") {
+      failure = r;
+      typed = to;
+      return;
+    }
     url = to.replace(/\/+$/, "");
     typed = url;
     selected = "";
@@ -73,6 +82,12 @@
     editing = s.url;
     checked = null;
   }
+
+  onMount(() => {
+    if (!start) return;
+    server = servers.find((s) => start.startsWith(s.url)) ?? null;
+    open(start);
+  });
 
   async function checkConnection() {
     if (!form || !form.url.trim()) return;
@@ -177,7 +192,15 @@
               <span class="muted">{e.lastCommit.date ? new Date(e.lastCommit.date).toLocaleDateString() : ""}</span>
             </button>
           {:else}
-            <p class="muted empty">{loading ? "Loading..." : url ? "This folder is empty." : "Nothing open."}</p>
+            {#if failure && !loading}
+              <div class="empty failed">
+                <b>Could not open {typed}</b>
+                <p>{failure}</p>
+                {#if typed.startsWith("http://")}<p class="muted">Many servers, VisualSVN Server among them, only answer on https://. Try {typed.replace("http://", "https://")}</p>{/if}
+              </div>
+            {:else}
+              <p class="muted empty">{loading ? "Loading..." : url ? "This folder is empty." : "Pick a server on the left, or type an address above."}</p>
+            {/if}
           {/each}
         </div>
       </div>
@@ -219,6 +242,9 @@
   .hdr { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--line); border-radius: 0; padding: 6px 12px; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { padding: 10px; margin: 0; }
+  .failed { display: grid; gap: 6px; }
+  .failed b { color: var(--danger); overflow-wrap: anywhere; }
+  .failed p { margin: 0; overflow-wrap: anywhere; user-select: text; }
   .form { display: grid; gap: 12px; max-width: 480px; }
   .fine { margin: -6px 0 0; font-size: 12px; }
   .bad { color: var(--danger); }

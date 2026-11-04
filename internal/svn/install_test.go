@@ -56,3 +56,16 @@ func TestInstallCommand_NothingAvailable(t *testing.T) {
 		t.Errorf("err = %v, want ErrNoInstaller", err)
 	}
 }
+
+func TestWindowsSvnPaths_TortoiseFirst(t *testing.T) {
+	// Arrange
+	env := map[string]string{"ProgramFiles": `C:\Program Files`}
+
+	// Act
+	paths := windowsSvnPaths(func(k string) string { return env[k] })
+
+	// Assert
+	if len(paths) == 0 || paths[0] != `C:\Program Files\TortoiseSVN\bin\svn.exe` {
+		t.Errorf("paths = %q", paths)
+	}
+}

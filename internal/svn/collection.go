@@ -40,7 +40,8 @@ func ParseCollection(page []byte) ([]ListEntry, error) {
 			case "title", "h2":
 				inTitle = true
 			case "index":
-				marked = marked || attr(t, "name") == collectionTitle
+				// A repository's own index always carries its revision; the list of repositories has none.
+				marked = marked || attr(t, "name") == collectionTitle || (attr(t, "rev") == "" && attr(t, "base") == "")
 			case "a", "dir":
 				hrefs = append(hrefs, attr(t, "href"))
 			}

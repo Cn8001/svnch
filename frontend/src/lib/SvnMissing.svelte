@@ -41,7 +41,10 @@
     {/each}
   </ul>
   {#if os === "windows"}
-    <p class="muted small">TortoiseSVN works too, if you tick "command line client tools" in its installer.</p>
+    <p class="muted small">
+      Have TortoiseSVN? It has svn inside but leaves it out by default: run its installer again, choose Modify, turn on
+      "command line client tools", then Check again.
+    </p>
   {:else if os === "darwin"}
     <p class="muted small">No Homebrew yet? It is one line from brew.sh.</p>
   {/if}

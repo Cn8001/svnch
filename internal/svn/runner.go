@@ -85,6 +85,7 @@ func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...st
 		return nil, &CommandError{
 			Subcommand: subcommand,
 			Code:       errorCode(msg),
+			Causes:     errorCodes(msg),
 			Stderr:     msg,
 			Err:        err,
 		}
@@ -94,7 +95,8 @@ func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...st
 
 type CommandError struct {
 	Subcommand string
-	Code       string // svn error code such as E155007, empty when stderr carries none
+	Code       string   // svn error code such as E155007, empty when stderr carries none
+	Causes     []string // every E code in stderr; svn chains them, and the reason is often not the first
 	Stderr     string
 	Err        error
 }
@@ -108,31 +110,53 @@ func (e *CommandError) Error() string {
 
 func (e *CommandError) Unwrap() error { return e.Err }
 
-// Is lets callers match svn error codes with errors.Is against this package's sentinels.
+// Is lets callers match svn error codes with errors.Is against this package's sentinels. It looks at the whole chain:
+// a password-protected http server fails with E170013 "unable to connect" first and the E215004 that says why after.
 func (e *CommandError) Is(target error) bool {
-	switch e.Code {
-	case "E155007":
-		return target == ErrNotWorkingCopy
-	case "E215004", "E170001":
-		return target == ErrAuthFailed
-	case "E230001":
-		return target == ErrCertUntrusted
+	codes := e.Causes
+	if len(codes) == 0 {
+		codes = []string{e.Code}
+	}
+	for _, c := range codes {
+		if sentinel(c) == target {
+			return true
+		}
 	}
 	return false
 }
 
+func sentinel(code string) error {
+	switch code {
+	case "E155007":
+		return ErrNotWorkingCopy
+	case "E215004", "E170001":
+		return ErrAuthFailed
+	case "E230001":
+		return ErrCertUntrusted
+	}
+	return nil
+}
+
 // errorCode returns the first E code, because svn prints warnings (W codes) before the error that failed the command.
 func errorCode(stderr string) string {
+	if codes := errorCodes(stderr); len(codes) > 0 {
+		return codes[0]
+	}
+	return ""
+}
+
+func errorCodes(stderr string) []string {
+	var codes []string
 	for line := range strings.Lines(stderr) {
 		rest, ok := strings.CutPrefix(line, "svn: ")
 		if !ok || len(rest) < 8 || rest[0] != 'E' || rest[7] != ':' {
 			continue
 		}
 		if isDigits(rest[1:7]) {
-			return rest[:7]
+			codes = append(codes, rest[:7])
 		}
 	}
-	return ""
+	return codes
 }
 
 func isDigits(s string) bool {

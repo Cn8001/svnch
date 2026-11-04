@@ -24,12 +24,11 @@ type Setup struct {
 func Detect(ctx context.Context, binary, problem string) Setup {
 	s := Setup{OS: runtime.GOOS}
 	if binary == "" || !fileExists(binary) {
-		path, err := exec.LookPath("svn")
-		if err != nil {
+		binary = findSvn()
+		if binary == "" {
 			s.Problem = problem
 			return s
 		}
-		binary = path
 	}
 	s.Binary = binary
 	if out, err := command(ctx, binary, "--version", "--quiet").Output(); err == nil {
@@ -40,7 +39,7 @@ func Detect(ctx context.Context, binary, problem string) Setup {
 
 // EnsureInstalled returns the svn binary to run, installing Subversion through the OS package manager when it is missing.
 func EnsureInstalled(ctx context.Context) (string, error) {
-	if path, err := exec.LookPath("svn"); err == nil {
+	if path := findSvn(); path != "" {
 		return path, nil
 	}
 
@@ -55,11 +54,7 @@ func EnsureInstalled(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("install svn with %s: %w", args[0], err)
 	}
 
-	if path, err := exec.LookPath("svn"); err == nil {
-		return path, nil
-	}
-	// winget does not update this process's PATH, so the fresh install is only reachable by its known location.
-	if path := windowsSvnPath(); runtime.GOOS == "windows" && fileExists(path) {
+	if path := findSvn(); path != "" {
 		return path, nil
 	}
 	return "", fmt.Errorf("svn still missing after install: %w", ErrSvnNotFound)
@@ -100,8 +95,34 @@ func hasCommand(name string) bool {
 	return err == nil
 }
 
-func windowsSvnPath() string {
-	return os.Getenv("ProgramFiles") + `\SlikSvn\bin\svn.exe`
+// findSvn looks on PATH, then on Windows where the usual installers put svn.exe: an install made after this
+// session started, TortoiseSVN's included, is not on this process's PATH yet, and winget never updates it.
+func findSvn() string {
+	if path, err := exec.LookPath("svn"); err == nil {
+		return path
+	}
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	for _, p := range windowsSvnPaths(os.Getenv) {
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func windowsSvnPaths(env func(string) string) []string {
+	var out []string
+	for _, root := range []string{env("ProgramFiles"), env("ProgramFiles(x86)"), env("ProgramW6432")} {
+		if root == "" {
+			continue
+		}
+		for _, dir := range []string{`TortoiseSVN\bin`, `SlikSvn\bin`, `VisualSVN Server\bin`, `Subversion\bin`, `CollabNet\Subversion Client`} {
+			out = append(out, root+`\`+dir+`\svn.exe`)
+		}
+	}
+	return out
 }
 
 func fileExists(path string) bool {

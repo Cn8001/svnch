@@ -7,6 +7,7 @@ export {
   SetupService,
   ServerService,
   ExplorerService,
+  TrustService,
 } from "../../bindings/github.com/Cn8001/svnch/internal/service";
 export type { Server } from "../../bindings/github.com/Cn8001/svnch/internal/servers";
 export type { Status as ExplorerStatus } from "../../bindings/github.com/Cn8001/svnch/internal/explorer";

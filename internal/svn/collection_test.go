@@ -44,3 +44,29 @@ func TestParseCollection_RepositoryFolderPageIsRejected(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotCollection", err)
 	}
 }
+
+func TestParseCollection_XmlIndexWithoutRevisionIsCollection(t *testing.T) {
+	// Arrange
+	page := `<?xml version="1.0"?><svn version="1.14.5"><index path="/"><dir name="Game" href="Game/" /><dir name="Tools" href="Tools/" /></index></svn>`
+
+	// Act
+	got, err := ParseCollection([]byte(page))
+
+	// Assert
+	if err != nil || len(got) != 2 {
+		t.Errorf("got (%+v, %v)", got, err)
+	}
+}
+
+func TestParseCollection_XmlRepositoryIndexIsRejected(t *testing.T) {
+	// Arrange
+	page := `<?xml version="1.0"?><svn version="1.14.5"><index rev="42" path="/" base="Game"><dir name="trunk" href="trunk/" /></index></svn>`
+
+	// Act
+	_, err := ParseCollection([]byte(page))
+
+	// Assert
+	if !errors.Is(err, ErrNotCollection) {
+		t.Errorf("err = %v, want ErrNotCollection", err)
+	}
+}

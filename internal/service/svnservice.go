@@ -145,6 +145,14 @@ func (s *SVNService) Move(ctx context.Context, from, to string) error {
 	return nil
 }
 
+// CheckConnection is List with a short limit: it answers "can I reach this" while a server is being added, and a
+// wrong address or a missing VPN should say so in seconds rather than after List's full minute.
+func (s *SVNService) CheckConnection(ctx context.Context, url string) ([]svn.ListEntry, error) {
+	ctx, stop := context.WithTimeout(ctx, 10*time.Second)
+	defer stop()
+	return s.List(ctx, url)
+}
+
 // List has a timeout because a server that never answers would otherwise hold the browser until the OS gives up on the
 // connection, which can be minutes.
 func (s *SVNService) List(ctx context.Context, target string) ([]svn.ListEntry, error) {

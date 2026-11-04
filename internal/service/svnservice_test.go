@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/Cn8001/svnch/internal/svn"
 )
@@ -279,5 +280,32 @@ func TestList_OtherPageKeepsSvnError(t *testing.T) {
 	var ce *svn.CommandError
 	if !errors.As(err, &ce) || ce != svnErr {
 		t.Errorf("err = %v, want the svn error", err)
+	}
+}
+
+type slowRunner struct{ fakeRunner }
+
+func (r *slowRunner) Run(ctx context.Context, _, _ string, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestCheckConnection_GivesUpOnASilentServer(t *testing.T) {
+	// Arrange
+	runner := &slowRunner{}
+	s := New(runner, runner, http.DefaultClient)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	start := time.Now()
+
+	// Act
+	_, err := s.CheckConnection(ctx, "https://svn.example.org/repo")
+
+	// Assert
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want DeadlineExceeded", err)
+	}
+	if took := time.Since(start); took > 15*time.Second {
+		t.Errorf("took %s, want about 10s", took)
 	}
 }

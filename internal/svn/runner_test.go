@@ -106,3 +106,36 @@ func TestExecRunner_MissingBinary(t *testing.T) {
 		t.Errorf("err = %v, want ErrSvnNotFound", err)
 	}
 }
+
+func TestCommandError_AuthLaterInTheChainIsAuth(t *testing.T) {
+	// Arrange
+	stderr := "svn: E170013: Unable to connect to a repository at URL 'https://svn.example.org/repo'\n" +
+		"svn: E215004: No more credentials or we tried too many times.\nAuthentication failed\n"
+	err := error(&CommandError{Subcommand: "list", Code: errorCode(stderr), Causes: errorCodes(stderr), Stderr: stderr})
+
+	// Act
+	auth := errors.Is(err, ErrAuthFailed)
+
+	// Assert
+	if !auth {
+		t.Errorf("errors.Is(ErrAuthFailed) = false for %q", stderr)
+	}
+	if errors.Is(err, ErrNotWorkingCopy) {
+		t.Errorf("matched ErrNotWorkingCopy too")
+	}
+}
+
+func TestCommandError_CertLaterInTheChainIsCert(t *testing.T) {
+	// Arrange
+	stderr := "svn: E170013: Unable to connect to a repository at URL 'https://svn.example.org/repo'\n" +
+		"svn: E230001: Server SSL certificate verification failed: issuer is not trusted\n"
+	err := error(&CommandError{Subcommand: "list", Code: errorCode(stderr), Causes: errorCodes(stderr), Stderr: stderr})
+
+	// Act
+	cert := errors.Is(err, ErrCertUntrusted)
+
+	// Assert
+	if !cert {
+		t.Errorf("errors.Is(ErrCertUntrusted) = false for %q", stderr)
+	}
+}

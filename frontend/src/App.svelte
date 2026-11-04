@@ -16,8 +16,10 @@
     SetupService,
     ServerService,
     ExplorerService,
+    TrustService,
     failureCode,
     type ExplorerStatus,
+    type ServerCert,
     type Server,
     type Setup,
     type AppInfo,
@@ -84,13 +86,15 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details";
 
   let setup = $state<Setup | null>(null);
   let checkingSvn = $state(false);
   let servers: Server[] = $state([]);
   let login = $state({ url: "", username: "", password: "", error: "", busy: false, manual: false }); // manual: opened by the user, so the url is editable
   let sessionUser = $state("");
+  let cert = $state<{ open: boolean; url: string; info: ServerCert | null; error: string; busy: boolean }>({ open: false, url: "", info: null, error: "", busy: false });
+  let certDone: ((ok: boolean) => void) | null = null;
   let loginDone: ((ok: boolean) => void) | null = null;
   let loginOpen = $state(false); // over whatever window asked, so a half-filled form there survives the login
 
@@ -110,11 +114,14 @@
   let textBox = $state({ title: "", text: "" });
 
   const failed = Symbol("failed");
+  let lastFailure = ""; // the code of the last failed run, for callers that word their own message
 
   // Every svn call goes through here so the status bar, the cancel button, error reporting and the login prompt behave
   // the same. make is called again after a login, so a command that hit a password-protected server just carries on.
   async function run<T>(label: string, make: () => Promise<T> & { cancel?: () => void }, url = ""): Promise<T | typeof failed> {
-    for (let attempt = 0; ; attempt++) {
+    let logins = 0;
+    let trusts = 0;
+    for (;;) {
       let cancelled = false;
       const p = make();
       busy = label;
@@ -130,9 +137,11 @@
         busy = "";
         cancelBusy = null;
         const code = cancelled ? "CANCELLED" : failureCode(e);
+        lastFailure = code;
         const where = url || info?.repositoryRoot || "";
-        if (code === "AUTH" && attempt < 3 && where && (await askLogin(where, attempt ? "That did not work, try again." : ""))) continue;
-        if (code === "CERT") {
+        if (code === "AUTH" && logins < 3 && where && (await askLogin(where, logins++ ? "That did not work, try again." : ""))) continue;
+        if (code === "CERT" && trusts++ < 2 && where && (await askTrust(where))) continue;
+        if (code === "CERT" && !cert.info) {
           textBox = {
             title: "Untrusted server certificate",
             text: `${errorText(e)}\n\nsvn does not trust this server's HTTPS certificate. Check it once in a terminal and accept it permanently:\n\n  svn info ${where || "<url>"}\n\nthen press (p) when svn asks.`,
@@ -148,6 +157,40 @@
         cancelBusy = null;
       }
     }
+  }
+
+  // askTrust shows the certificate and resolves true once it is trusted; false sends run on to the text
+  // explanation only when the certificate could not even be read (an svn:// or proxy setup, say).
+  async function askTrust(url: string): Promise<boolean> {
+    cert = { open: false, url, info: null, error: "", busy: false };
+    try {
+      cert.info = await TrustService.Cert(url);
+    } catch {
+      return false;
+    }
+    cert.open = true;
+    return new Promise((resolve) => (certDone = resolve));
+  }
+
+  function finishTrust(ok: boolean) {
+    cert.open = false;
+    certDone?.(ok);
+    certDone = null;
+  }
+
+  async function submitTrust() {
+    if (!cert.info) return;
+    cert.busy = true;
+    cert.error = "";
+    try {
+      await TrustService.Trust(cert.url, cert.info.fingerprint);
+    } catch (e) {
+      cert.busy = false;
+      cert.error = errorText(e);
+      return;
+    }
+    cert.busy = false;
+    finishTrust(true);
   }
 
   function askLogin(url: string, message = "", manual = false): Promise<boolean> {
@@ -408,22 +451,64 @@
     modal = "checkout";
   }
 
-  async function openRepos() {
+  let reposAt = $state(""); // where the browser opens, when it is opened for a known place
+
+  async function openRepos(at = "") {
     await loadServers();
+    reposAt = at;
     modal = "repos";
+  }
+
+  let wcServer = $derived(info ? servers.find((s) => info!.url.startsWith(s.url)) : undefined);
+
+  function host(url: string): string {
+    try {
+      return new URL(url).host || url;
+    } catch {
+      return url;
+    }
+  }
+
+  async function openDetails() {
+    if (!wc) return;
+    modal = "details";
+    await reloadInfo();
+    try {
+      sessionUser = await svn.LoggedInAs();
+    } catch {}
+  }
+
+  function wcItems(): MenuItem[] {
+    return [
+      { label: "Details...", action: openDetails },
+      { separator: true },
+      { label: "Copy URL", action: () => info && Clipboard.SetText(info.url) },
+      { label: "Copy repository root", action: () => info && Clipboard.SetText(info.repositoryRoot) },
+      { label: "Copy working copy path", action: () => Clipboard.SetText(wc) },
+      { separator: true },
+      { label: "Browse on server...", action: () => info && openRepos(info.url), disabled: !!busy },
+      { label: "Show log", action: () => openLog(wc), disabled: !!busy },
+      { label: "Update", action: update, disabled: !!busy },
+      { label: "Log in...", action: () => startLogin(info?.repositoryRoot) },
+    ];
   }
 
   async function listRepo(url: string) {
     const r = await run(`Listing ${url}`, () => svn.List(url), url);
-    return r === failed ? null : (r ?? []);
+    if (r !== failed) return r ?? [];
+    return lastFailure === "TIMEOUT" ? "No answer within a minute." : error || "Could not list it.";
   }
 
   // The check goes through run, so a server that wants a password brings up the login with the form's username.
   async function checkServer(url: string, username: string) {
     const target = url.trim().replace(/\/+$/, "");
     if (username) login.username = username;
-    const r = await run(`Connecting to ${target}`, () => svn.List(target), target);
-    if (r === failed) return { ok: false, text: error || "Could not connect.", username: "" };
+    const r = await run(`Connecting to ${target}`, () => svn.CheckConnection(target), target);
+    if (r === failed) {
+      const hint = target.startsWith("http://") ? " The server may only answer on https://." : " Check the address, or whether you need a VPN.";
+      const text = lastFailure === "TIMEOUT" ? `No answer in 10 seconds.${hint}` : error || "Could not connect.";
+      return { ok: false, text, username: "" };
+    }
     const n = (r ?? []).length;
     return {
       ok: true,
@@ -596,7 +681,7 @@
       items: [
         { label: "Open working copy...", action: openFolder, hint: "Ctrl+O", disabled: !!busy },
         { label: "Checkout...", action: () => openCheckout(), disabled: !!busy || svnMissing },
-        { label: "Browse repositories...", action: openRepos, hint: "Ctrl+B", disabled: !!busy || svnMissing },
+        { label: "Browse repositories...", action: () => openRepos(), hint: "Ctrl+B", disabled: !!busy || svnMissing },
         { separator: true as const },
         { label: "Quit", action: () => Application.Quit() },
       ],
@@ -608,6 +693,7 @@
         { label: "Update", action: update, hint: "Ctrl+U", disabled: !wc || !!busy },
         { label: "Commit", action: commit, hint: "Ctrl+Enter", disabled: !canCommit },
         { separator: true as const },
+        { label: "Details...", action: openDetails, disabled: !wc },
         { label: "Show log", action: () => openLog(wc), disabled: !wc || !!busy },
         { label: "Merge...", action: openMerge, disabled: !wc || !!busy },
         { separator: true as const },
@@ -628,7 +714,7 @@
   ]);
 
   function onKey(e: KeyboardEvent) {
-    if (modal || loginOpen || ctxMenu) return;
+    if (modal || loginOpen || cert.open || ctxMenu) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "F5") {
       e.preventDefault();
@@ -672,13 +758,13 @@
 
   <div class="toolbar">
     <button onclick={openFolder} disabled={!!busy || svnMissing}>Open...</button>
-    <button onclick={openRepos} disabled={!!busy || svnMissing}>Repos</button>
+    <button onclick={() => openRepos()} disabled={!!busy || svnMissing}>Repos</button>
     <span class="sep"></span>
     <button onclick={update} disabled={!wc || !!busy}>Update</button>
     <button onclick={refresh} disabled={!wc || !!busy}>Refresh</button>
     <button onclick={() => openLog(wc)} disabled={!wc || !!busy}>Log</button>
     {#if info}
-      <div class="where">
+      <div class="where" role="button" tabindex="-1" title="Right-click for details" oncontextmenu={(e) => { e.preventDefault(); ctxMenu = { x: e.clientX, y: e.clientY, items: wcItems() }; }} ondblclick={openDetails}>
         <span class="path" title={wc}>{wc}</span>
         <span class="muted" title={info.url}>{info.relativeUrl || info.url}</span>
         <span class="rev">r{info.revision}</span>
@@ -698,7 +784,7 @@
       <div class="actions">
         <button class="primary" onclick={openFolder} disabled={!!busy}>Open working copy...</button>
         <button onclick={() => openCheckout()} disabled={!!busy}>Checkout...</button>
-        <button onclick={openRepos} disabled={!!busy}>Browse repositories...</button>
+        <button onclick={() => openRepos()} disabled={!!busy}>Browse repositories...</button>
       </div>
     </div>
   {:else}
@@ -712,6 +798,10 @@
             {focused}
             onfocus={showDiff}
             ontoggle={(p) => (checked.has(p) ? checked.delete(p) : checked.add(p))}
+            onlythese={(ps) => {
+              checked.clear();
+              ps.forEach((p) => checked.add(p));
+            }}
             oncontext={(p, e) => (ctxMenu = { x: e.clientX, y: e.clientY, items: contextItems(p) })}
           />
         </div>
@@ -748,7 +838,7 @@
       <span>Repository URL</span>
       <div class="row">
         <input bind:value={co.url} list="saved-servers" placeholder="https://svn.example.org/repo/trunk" />
-        <button type="button" onclick={openRepos}>Browse...</button>
+        <button type="button" onclick={() => openRepos()}>Browse...</button>
       </div>
     </label>
     <datalist id="saved-servers">
@@ -955,9 +1045,40 @@
       oncheckout={(url) => openCheckout(url)}
       onlog={(url) => openLog(url)}
       check={checkServer}
+      start={reposAt}
       onlogin={startLogin}
       cancel={() => cancelBusy?.()}
     />
+  </Modal>
+{:else if modal === "details" && info}
+  <Modal title="Working copy" onclose={() => (modal = null)}>
+    <dl class="kv">
+      <dt>Server</dt>
+      <dd>{host(info.repositoryRoot)}{#if wcServer}<span class="muted"> &middot; saved as {wcServer.name}</span>{/if}</dd>
+      <dt>Repository</dt>
+      <dd class="mono">{info.repositoryRoot}</dd>
+      <dt>Branch path</dt>
+      <dd class="mono">{info.relativeUrl || "^/"}</dd>
+      <dt>URL</dt>
+      <dd class="mono">{info.url}</dd>
+      <dt>Working copy</dt>
+      <dd class="mono">{info.workingCopyRoot || wc}</dd>
+      <dt>Revision</dt>
+      <dd>r{info.revision}</dd>
+      <dt>Last change</dt>
+      <dd>{[`r${info.lastCommit.revision}`, info.lastCommit.author && `by ${info.lastCommit.author}`, info.lastCommit.date && new Date(info.lastCommit.date).toLocaleString()].filter(Boolean).join(" ")}</dd>
+      <dt>Depth</dt>
+      <dd>{info.depth || "infinity"}</dd>
+      <dt>Logged in as</dt>
+      <dd>{sessionUser || (wcServer?.username ? `${wcServer.username} (saved, svn keeps the password)` : "svn's own saved login, if any")}</dd>
+      <dt>UUID</dt>
+      <dd class="mono muted">{info.repositoryUuid}</dd>
+    </dl>
+    {#snippet footer()}
+      <button onclick={() => Clipboard.SetText(info?.url ?? "")}>Copy URL</button>
+      <button onclick={() => info && openRepos(info.url)}>Browse on server...</button>
+      <button class="primary" onclick={() => (modal = null)}>Close</button>
+    {/snippet}
   </Modal>
 {:else if modal === "svn"}
   <Modal title="Installing svn" onclose={() => (modal = null)}>
@@ -966,6 +1087,39 @@
     {:else}
       <SvnMissing {setup} checking={checkingSvn} oncheck={checkSvn} />
     {/if}
+  </Modal>
+{/if}
+
+{#if cert.open && cert.info}
+  <Modal title="Untrusted certificate" onclose={() => finishTrust(false)}>
+    <p class="certnote">
+      <b>{cert.info.realm.replace("https://", "")}</b> sent a certificate this computer does not trust, because
+      {cert.info.problems?.join(" and ")}.
+    </p>
+    <p class="muted fine">
+      That is normal for a server inside a company network with its own certificate. Trust it if the fingerprint
+      matches the one your server admin sees (VisualSVN Server Manager shows it under the server's certificate).
+    </p>
+    <dl class="kv">
+      <dt>Issued to</dt>
+      <dd>{cert.info.subject}</dd>
+      <dt>Issued by</dt>
+      <dd>{cert.info.issuer}</dd>
+      {#if cert.info.names?.length}
+        <dt>Names</dt>
+        <dd>{cert.info.names.join(", ")}</dd>
+      {/if}
+      <dt>Valid</dt>
+      <dd>{new Date(cert.info.validFrom).toLocaleDateString()} to {new Date(cert.info.validUntil).toLocaleDateString()}</dd>
+      <dt>Fingerprint</dt>
+      <dd class="mono">{cert.info.fingerprint}</dd>
+    </dl>
+    {#if cert.error}<p class="error">{cert.error}</p>{/if}
+    <p class="muted fine">svnch saves it where svn keeps the certificates you accept, so TortoiseSVN trusts it too.</p>
+    {#snippet footer()}
+      <button onclick={() => finishTrust(false)}>Cancel</button>
+      <button class="primary" disabled={cert.busy} onclick={submitTrust}>{cert.busy ? "Saving..." : "Trust this certificate"}</button>
+    {/snippet}
   </Modal>
 {/if}
 
@@ -1079,6 +1233,13 @@
   .act.M { color: var(--mod-ink); }
   .act.D { color: var(--del-ink); }
 
+  .where[role="button"] { cursor: default; padding: 2px 4px 2px 8px; border-radius: var(--radius); }
+  .where[role="button"]:hover { background: var(--hover); }
+  .certnote { margin: 0; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; user-select: text; }
+  .kv .mono { font-family: var(--mono); font-size: 12px; }
   .about { display: flex; gap: 18px; align-items: center; }
   .about img { width: 104px; height: 104px; }
   .about h1 { margin: 0 0 6px; font-size: 20px; }
