@@ -1,0 +1,83 @@
+package svn
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+)
+
+var ErrNoInstaller = errors.New("no supported package manager found")
+
+// EnsureInstalled returns the svn binary to run, installing Subversion through the OS package manager when it is missing.
+func EnsureInstalled(ctx context.Context) (string, error) {
+	if path, err := exec.LookPath("svn"); err == nil {
+		return path, nil
+	}
+
+	args, err := installCommand(runtime.GOOS, hasCommand)
+	if err != nil {
+		return "", fmt.Errorf("install svn: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("install svn with %s: %w", args[0], err)
+	}
+
+	if path, err := exec.LookPath("svn"); err == nil {
+		return path, nil
+	}
+	// winget does not update this process's PATH, so the fresh install is only reachable by its known location.
+	if path := windowsSvnPath(); runtime.GOOS == "windows" && fileExists(path) {
+		return path, nil
+	}
+	return "", fmt.Errorf("svn still missing after install: %w", ErrSvnNotFound)
+}
+
+func installCommand(goos string, has func(string) bool) ([]string, error) {
+	switch goos {
+	case "windows":
+		if has("winget") {
+			return []string{"winget", "install", "--id", "Slik.Subversion", "-e", "--silent",
+				"--accept-package-agreements", "--accept-source-agreements"}, nil
+		}
+	case "darwin":
+		if has("brew") {
+			return []string{"brew", "install", "subversion"}, nil
+		}
+	case "linux":
+		// pkexec shows a graphical password prompt, since the app has no terminal for sudo.
+		if !has("pkexec") {
+			return nil, fmt.Errorf("pkexec missing: %w", ErrNoInstaller)
+		}
+		switch {
+		case has("apt-get"):
+			return []string{"pkexec", "apt-get", "install", "-y", "subversion"}, nil
+		case has("dnf"):
+			return []string{"pkexec", "dnf", "install", "-y", "subversion"}, nil
+		case has("pacman"):
+			return []string{"pkexec", "pacman", "-S", "--noconfirm", "subversion"}, nil
+		case has("zypper"):
+			return []string{"pkexec", "zypper", "install", "-y", "subversion"}, nil
+		}
+	}
+	return nil, fmt.Errorf("%s: %w", goos, ErrNoInstaller)
+}
+
+func hasCommand(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func windowsSvnPath() string {
+	return os.Getenv("ProgramFiles") + `\SlikSvn\bin\svn.exe`
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
