@@ -78,7 +78,53 @@ func (r *ExecRunner) Credentials() (username, password string) {
 }
 
 func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...string) ([]byte, error) {
+	args, file, err := targetsFile(subcommand, args)
+	if err != nil {
+		return nil, fmt.Errorf("svn %s: %w", subcommand, err)
+	}
+	if file != "" {
+		defer os.Remove(file)
+	}
 	return r.exec(ctx, r.binary, dir, subcommand, []string{subcommand}, args)
+}
+
+// maxTargetChars keeps a command line well inside Windows' limit of 32767 characters, which a long list of paths in
+// a big working copy passes, and then the command does not start at all.
+const maxTargetChars = 16000
+
+// targetsFile moves a long list of targets into a file svn reads with --targets, for the commands that take it. The
+// targets are everything after "--"; a command whose "--" also guards a name or a value is not in the list.
+func targetsFile(subcommand string, args []string) ([]string, string, error) {
+	switch subcommand {
+	case "add", "commit", "delete", "lock", "unlock", "revert", "resolve", "update", "changelist", "status", "info":
+	default:
+		return args, "", nil
+	}
+	dash := slices.Index(args, "--")
+	if dash < 0 {
+		return args, "", nil
+	}
+	size := 0
+	for _, a := range args[dash+1:] {
+		size += len(a) + 3
+	}
+	if size <= maxTargetChars {
+		return args, "", nil
+	}
+	f, err := os.CreateTemp("", "svnch-targets-*")
+	if err != nil {
+		return nil, "", fmt.Errorf("targets file: %w", err)
+	}
+	_, werr := f.WriteString(strings.Join(args[dash+1:], "\n") + "\n")
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(f.Name())
+		return nil, "", fmt.Errorf("targets file: %w", werr)
+	}
+	out := append(slices.Clone(args[:dash]), "--targets", f.Name())
+	return out, f.Name(), nil
 }
 
 // Mucc runs svnmucc with its options and then its actions, svnmucc's own order.

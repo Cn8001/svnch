@@ -10,6 +10,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -288,6 +289,30 @@ func TestIntegration_EverySVNServiceMethod(t *testing.T) {
 	})
 	w.unlocked(wc, "discard")
 	w.unlocked(other, "discard")
+
+	t.Run("many paths at once", func(t *testing.T) {
+		// Enough long paths to pass Windows' command line limit, as a big game project's assets do.
+		var paths []string
+		for i := range 600 {
+			p := filepath.Join(wc, "Assets", "Environment", "Textures", "Terrain", fmt.Sprintf("tile_%04d_albedo_normal.png", i))
+			w.write(p, "x")
+			paths = append(paths, p)
+		}
+		w.must(w.s.Add(ctx, paths), "add 600")
+		if st := w.status(wc); st["Assets/Environment/Textures/Terrain/tile_0599_albedo_normal.png"].Item != "added" {
+			t.Fatalf("not added: %d entries", len(st))
+		}
+		res, err := w.s.Discard(ctx, wc, []string{wc})
+		w.must(err, "discard all")
+		if res.Removed == 0 {
+			t.Errorf("discard = %+v", res)
+		}
+		if st := w.status(wc); len(st) != 0 {
+			t.Errorf("after discard all: %d entries left", len(st))
+		}
+	})
+	w.unlocked(wc, "many paths at once")
+	w.unlocked(other, "many paths at once")
 
 	t.Run("move and delete", func(t *testing.T) {
 		moved := filepath.Join(wc, "src", "app.go")

@@ -3,10 +3,12 @@ package svn
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -216,5 +218,35 @@ func TestExecRunner_ReportsProgressWhileKeepingOutput(t *testing.T) {
 	}
 	if last.Items != 2 || last.Item != "b.txt" || last.Command != "update" {
 		t.Errorf("progress = %+v", last)
+	}
+}
+
+func TestTargetsFile_MovesLongListsOnly(t *testing.T) {
+	// Arrange
+	short := []string{"--depth", "infinity", "--", "/wc/a"}
+	long := []string{"--depth", "infinity", "--"}
+	for i := range 2000 {
+		long = append(long, fmt.Sprintf("/wc/Assets/Textures/pack%04d/texture.png", i))
+	}
+
+	// Act
+	same, noFile, err1 := targetsFile("revert", short)
+	moved, file, err2 := targetsFile("revert", long)
+	kept, propFile, _ := targetsFile("propset", long)
+
+	// Assert
+	if err1 != nil || noFile != "" || !slices.Equal(same, short) {
+		t.Errorf("short list changed: %q %q %v", same, noFile, err1)
+	}
+	if err2 != nil || file == "" || !slices.Equal(moved, []string{"--depth", "infinity", "--targets", file}) {
+		t.Fatalf("long list: %q %q %v", moved, file, err2)
+	}
+	defer os.Remove(file)
+	data, _ := os.ReadFile(file)
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 2000 || lines[1] != long[4] {
+		t.Errorf("targets file has %d lines, second %q", len(lines), lines[1])
+	}
+	if propFile != "" || !slices.Equal(kept, long) {
+		t.Errorf("propset's list was moved")
 	}
 }

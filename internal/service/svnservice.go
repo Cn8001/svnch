@@ -265,8 +265,10 @@ func (s *SVNService) Discard(ctx context.Context, wc string, paths []string) (sv
 		entries = append(entries, e...)
 	}
 	plan := svn.PlanDiscard(wc, entries)
-	if len(plan.Revert) > 0 {
-		if err := s.Revert(ctx, plan.Revert); err != nil {
+	// Revert what was asked for, each with all below it, rather than every changed item one by one: the same items,
+	// and a command line that stays short when a whole working copy with hundreds of changes is discarded.
+	if back := svn.RevertRoots(paths, entries); len(plan.Revert) > 0 && len(back) > 0 {
+		if err := s.Revert(ctx, back); err != nil {
 			return svn.DiscardResult{}, fmt.Errorf("discard: %w", err)
 		}
 	}

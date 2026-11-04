@@ -47,3 +47,16 @@ func TestPlanDiscard_NeverRemovesOutsideOrTheWorkingCopyItself(t *testing.T) {
 		t.Errorf("remove = %q, want nothing", plan.Remove)
 	}
 }
+
+func TestRevertRoots_SkipsAskedPathsThatAreNew(t *testing.T) {
+	// Arrange
+	entries := []StatusEntry{{Path: "/wc/new.txt", Item: "unversioned"}, {Path: "/wc/a.go", Item: "modified"}}
+
+	// Act
+	roots := RevertRoots([]string{"/wc", "/wc/new.txt", "/wc/a.go"}, entries)
+
+	// Assert
+	if !slices.Equal(roots, []string{"/wc", "/wc/a.go"}) {
+		t.Errorf("roots = %q", roots)
+	}
+}

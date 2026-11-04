@@ -47,3 +47,19 @@ func inside(wc, path string) bool {
 	rel, err := filepath.Rel(wc, path)
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
+
+// RevertRoots is the asked-for paths that svn can revert: a path that is itself new to svn has nothing to go back to,
+// and reverting it would fail, so it is left for the delete.
+func RevertRoots(paths []string, entries []StatusEntry) []string {
+	item := map[string]string{}
+	for _, e := range entries {
+		item[e.Path] = e.Item
+	}
+	var out []string
+	for _, p := range paths {
+		if it := item[p]; it != "unversioned" && it != "ignored" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
