@@ -74,7 +74,7 @@ func main() {
 		slog.Warn("own path unknown, explorer menu uses the bare name", "error", err)
 		exe = "svnch.exe"
 	}
-	menu := explorer.New(exe)
+	menu := explorer.New(exe, filepath.Join(configDir, "svnch", "icons"))
 	if err := menu.Repair(ctx); err != nil {
 		slog.Warn("explorer menu", "error", err)
 	}

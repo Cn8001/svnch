@@ -15,8 +15,8 @@ shelve. Saved servers and a repository browser mean you never type a URL
 twice; give a server's address and pick from the repositories on it. The
 browser also opens, saves, renames and deletes files on the server.
 
-On Windows, Settings can add SVN Update, SVN Commit and an svnch submenu with
-the rest of the TortoiseSVN set to Explorer's right-click menu.
+On Windows, Settings can add an svnch submenu to Explorer's right-click menu,
+with update, commit and the rest of the TortoiseSVN set.
 
 
 ## Building

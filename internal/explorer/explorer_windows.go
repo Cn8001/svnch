@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
+	"path/filepath"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -12,20 +15,22 @@ import (
 type entry struct {
 	shell, arg string // the class's shell key, and %1 for a clicked item or %V for an open folder's background
 	items      []item
-	top        []item
 }
 
-// path is the submenu's key; the top entries are its siblings, named so they sort together.
+// path is the submenu's key.
 func (e entry) path() string { return e.shell + `\svnch` }
 
 // keys covers a right-click on a folder, on the empty space inside an open folder, and on any file.
 func keys() []entry {
 	return []entry{
-		{`Software\Classes\Directory\shell`, "%1", folderItems(), topItems(true)},
-		{`Software\Classes\Directory\Background\shell`, "%V", folderItems(), topItems(true)},
-		{`Software\Classes\*\shell`, "%1", fileItems(), topItems(false)},
+		{`Software\Classes\Directory\shell`, "%1", folderItems()},
+		{`Software\Classes\Directory\Background\shell`, "%V", folderItems()},
+		{`Software\Classes\*\shell`, "%1", fileItems()},
 	}
 }
+
+// oldTop are the entries an earlier svnch put beside the submenu; Enable and Disable clear them away.
+var oldTop = []string{"svnch1update", "svnch2commit", "svnch3checkout"}
 
 // ecfSeparatorBefore is Explorer's CommandFlags bit for a line above a subcommand.
 const ecfSeparatorBefore = 0x20
@@ -46,18 +51,10 @@ func (m *Menu) Enable(ctx context.Context) error {
 	if err := m.Disable(ctx); err != nil {
 		return err
 	}
+	if err := m.writeIcons(); err != nil {
+		return err
+	}
 	for _, k := range keys() {
-		for _, it := range k.top {
-			p := k.shell + `\` + it.key
-			for name, value := range map[string]string{"MUIVerb": it.label, "Icon": m.exe} {
-				if err := set(p, name, value); err != nil {
-					return err
-				}
-			}
-			if err := set(p+`\command`, "", m.command(it.action, k.arg)); err != nil {
-				return err
-			}
-		}
 		// An empty SubCommands value makes the entry a submenu filled from its shell subkey.
 		for name, value := range map[string]string{"MUIVerb": "svnch", "Icon": m.exe, "SubCommands": ""} {
 			if err := set(k.path(), name, value); err != nil {
@@ -66,8 +63,10 @@ func (m *Menu) Enable(ctx context.Context) error {
 		}
 		for _, it := range k.items {
 			p := k.path() + `\shell\` + it.key
-			if err := set(p, "MUIVerb", it.label); err != nil {
-				return err
+			for name, value := range map[string]string{"MUIVerb": it.label, "Icon": m.iconPath(it.icon)} {
+				if err := set(p, name, value); err != nil {
+					return err
+				}
 			}
 			if it.sep {
 				if err := setFlags(p, ecfSeparatorBefore); err != nil {
@@ -82,14 +81,35 @@ func (m *Menu) Enable(ctx context.Context) error {
 	return nil
 }
 
+// writeIcons copies the menu's icons out of the program, replacing older ones, since Explorer reads them from disk.
+func (m *Menu) writeIcons() error {
+	if err := os.MkdirAll(m.iconDir, 0o755); err != nil {
+		return fmt.Errorf("explorer menu icons: %w", err)
+	}
+	files, err := fs.Glob(icons, "icons/*.ico")
+	if err != nil {
+		return fmt.Errorf("explorer menu icons: %w", err)
+	}
+	for _, f := range files {
+		data, err := icons.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("explorer menu icons: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(m.iconDir, path.Base(f)), data, 0o644); err != nil {
+			return fmt.Errorf("explorer menu icons: %w", err)
+		}
+	}
+	return nil
+}
+
 func (m *Menu) Disable(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	for _, k := range keys() {
 		paths := []string{k.path()}
-		for _, it := range k.top {
-			paths = append(paths, k.shell+`\`+it.key)
+		for _, top := range oldTop {
+			paths = append(paths, k.shell+`\`+top)
 		}
 		for _, p := range paths {
 			if err := deleteTree(p); err != nil {
@@ -123,12 +143,17 @@ func (m *Menu) Repair(ctx context.Context) error {
 // registered reads the program from the folder menu's first entry, or from the single-entry layout svnch used before.
 func (m *Menu) registered() (exe string, ok, legacy bool, err error) {
 	folder := keys()[0]
-	cmd, found, err := readDefault(folder.shell + `\` + folder.top[0].key + `\command`)
-	if err != nil || found {
-		return exeOf(cmd), found, false, err
+	cmd, found, err := readDefault(folder.path() + `\shell\` + folder.items[0].key + `\command`)
+	if err != nil {
+		return "", false, false, err
 	}
-	// Earlier menus: the submenu alone, keyed 1open, or the single entry with its own command.
-	for _, old := range []string{folder.path() + `\shell\1open\command`, folder.path() + `\command`} {
+	if found {
+		// A menu that still has the old top entries beside it is from the version before the single submenu.
+		_, top, err := readDefault(folder.shell + `\` + oldTop[0] + `\command`)
+		return exeOf(cmd), true, top, err
+	}
+	// Earlier menus: a submenu keyed 1open or 01open, or the single entry with its own command.
+	for _, old := range []string{folder.path() + `\shell\1open\command`, folder.path() + `\shell\01open\command`, folder.path() + `\command`} {
 		cmd, found, err = readDefault(old)
 		if err != nil || found {
 			return exeOf(cmd), found, found, err

@@ -28,7 +28,7 @@ func statOf(files map[string]bool) func(string) (fs.FileInfo, error) {
 
 func TestExeOf_ReadsBackTheWrittenCommand(t *testing.T) {
 	// Arrange
-	m := New(`C:\Program Files\svnch\svnch.exe`)
+	m := New(`C:\Program Files\svnch\svnch.exe`, `C:\Users\me\AppData\Roaming\svnch\icons`)
 
 	// Act
 	got := exeOf(m.command("update", "%1"))
@@ -93,7 +93,7 @@ func TestParseLaunch_PlainStartHasNoPath(t *testing.T) {
 
 func TestMenus_KeysAreUniqueAndActionsKnown(t *testing.T) {
 	// Arrange
-	menus := map[string][]item{"folder": folderItems(), "file": fileItems(), "top": topItems(true)}
+	menus := map[string][]item{"folder": folderItems(), "file": fileItems()}
 
 	for name, items := range menus {
 		seen := map[string]bool{}
@@ -108,6 +108,9 @@ func TestMenus_KeysAreUniqueAndActionsKnown(t *testing.T) {
 			}
 			if !known(it.action) || it.label == "" {
 				t.Errorf("%s menu: %+v", name, it)
+			}
+			if _, err := icons.ReadFile("icons/" + it.icon + ".ico"); err != nil {
+				t.Errorf("%s menu: %s has no icon: %v", name, it.key, err)
 			}
 		}
 	}

@@ -81,7 +81,7 @@
     <div class="setting">
       <div>
         <b>Explorer</b>
-        <p class="muted">SVN Update, SVN Commit and an svnch submenu with the rest when you right-click a folder or file. On Windows 11 they are under "Show more options".</p>
+        <p class="muted">An svnch menu with TortoiseSVN's commands, update and commit first, when you right-click a folder or file. On Windows 11 it is under "Show more options".</p>
       </div>
       <button onclick={toggleExplorer}>{explorer.enabled ? "Remove from menu" : "Add to menu"}</button>
     </div>

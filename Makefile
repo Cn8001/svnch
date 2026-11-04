@@ -24,7 +24,7 @@ endif
 
 .DEFAULT_GOAL := start
 .PHONY: start help doctor dev build build-linux build-windows build-darwin build-all \
-        release publish publish-check test bindings licenses icons version clean
+        release publish publish-check test bindings licenses icons menuicons version clean
 
 ## start: (plain make) check this machine and build for it
 start: build
@@ -147,6 +147,10 @@ licenses:
 ## icons: regenerate the platform icons from build/appicon.png
 icons:
 	wails3 task common:generate:icons
+
+## menuicons: redraw the Explorer menu icons into internal/explorer/icons
+menuicons:
+	go run ./scripts/menuicons internal/explorer/icons
 
 ## version: V=1.2.3 sets the version (build/config.yml, the one place it lives)
 version:
