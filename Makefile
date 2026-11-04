@@ -24,7 +24,7 @@ endif
 
 .DEFAULT_GOAL := start
 .PHONY: start help doctor dev build build-linux build-windows build-darwin build-all \
-        test bindings icons version clean
+        release publish publish-check test bindings icons version clean
 
 ## start: (plain make) check this machine and build for it
 start: build
@@ -65,9 +65,11 @@ build-linux: doctor
 build-windows: doctor
 	GOOS=windows wails3 task build
 
+# package rather than build, since the .app bundle is what a Mac user runs and
+# what the updater swaps in.
 ## build-darwin: bin/svnch.app, on a Mac or through Docker
 build-darwin: doctor
-	GOOS=darwin wails3 task build
+	GOOS=darwin wails3 task package
 
 ## build-all: Windows plus this machine's OS (the others need Docker)
 ifeq ($(HOST),windows)
@@ -75,6 +77,57 @@ build-all: build-windows
 else
 build-all: build-$(HOST) build-windows
 endif
+
+# The in-app updater (Wails' GitHub provider) picks a release asset by its
+# name, which has to hold both the OS and the architecture, and checks it
+# against SHA256SUMS. Each archive holds exactly one entry, since the updater
+# swaps that one entry in for the running app. The Linux binary goes in a
+# tar.gz so it keeps its executable bit; the Windows exe needs no archive.
+ARCH := $(shell go env GOARCH)
+VERSION = $(shell sed -n 's/^  version: "\([^"]*\)".*/\1/p' build/config.yml)
+ifeq ($(HOST),darwin)
+  SHA256 := shasum -a 256
+else
+  SHA256 := sha256sum
+endif
+
+## release: build-all, then dist/ with the assets and SHA256SUMS the updater reads
+release: build-all
+	rm -rf dist && mkdir dist
+	cp bin/svnch.exe dist/svnch-windows-$(ARCH).exe
+ifeq ($(HOST),linux)
+	tar -czf dist/svnch-linux-$(ARCH).tar.gz -C bin svnch
+endif
+ifeq ($(HOST),darwin)
+	tar -czf dist/svnch-darwin-$(ARCH).tar.gz -C bin svnch.app
+endif
+	cd dist && $(SHA256) svnch-* > SHA256SUMS
+	@echo
+	@echo "dist/ is ready for v$(VERSION). make publish uploads it."
+
+# A version that is already released is refused rather than overwritten: an
+# app that installed it would never see the new files, so a change needs a new
+# version (make version V=...).
+RELEASE_REPO := Cn8001/svnch
+NOTES ?= RELEASE_NOTES.md
+
+## publish: release, then upload dist/ as v<version> on GitHub (needs gh)
+publish: publish-check
+	@$(MAKE) --no-print-directory release
+	gh release create v$(VERSION) dist/* -R $(RELEASE_REPO) --target $$(git rev-parse HEAD) \
+		--title "svnch $(VERSION)" \
+		$(if $(wildcard $(NOTES)),--notes-file $(NOTES),--notes "svnch $(VERSION)")
+
+# Checked before the build, so a missing login or an unpushed commit does not
+# cost a full build. The tag is made on GitHub at this commit, so it has to be
+# there already.
+publish-check:
+	@command -v gh >/dev/null || { echo "publish needs the GitHub CLI (https://cli.github.com), then: gh auth login"; exit 1; }
+	@gh auth status >/dev/null 2>&1 || { echo "Not logged in to GitHub. Run: gh auth login"; exit 1; }
+	@! gh release view v$(VERSION) -R $(RELEASE_REPO) >/dev/null 2>&1 || \
+		{ echo "v$(VERSION) is already released. Set a new one: make version V=..."; exit 1; }
+	@git fetch --quiet origin && [ -n "$$(git branch -r --contains HEAD)" ] || \
+		{ echo "This commit is not on GitHub yet. Run: git push"; exit 1; }
 
 # build/ios is a template package that does not build on its own, so vet and
 # test stay on the app's packages.
@@ -101,6 +154,6 @@ ifneq ($(V),)
 endif
 	@sed -n 's/^  version: "\([^"]*\)".*/\1/p' build/config.yml
 
-## clean: remove the built binaries
+## clean: remove the built binaries and release assets
 clean:
-	rm -rf bin
+	rm -rf bin dist

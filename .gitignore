@@ -1,5 +1,6 @@
 .task
 bin
+dist
 .env
 .DS_Store
 frontend/dist
