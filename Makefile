@@ -24,7 +24,7 @@ endif
 
 .DEFAULT_GOAL := start
 .PHONY: start help doctor dev build build-linux build-windows build-darwin build-all \
-        release publish publish-check test bindings icons version clean
+        release publish publish-check test bindings licenses icons version clean
 
 ## start: (plain make) check this machine and build for it
 start: build
@@ -138,7 +138,11 @@ test:
 
 ## bindings: regenerate the TypeScript bindings in frontend/bindings
 bindings:
-	wails3 generate bindings -clean=true -ts
+	wails3 generate bindings -clean=true -ts -i
+
+## licenses: rewrite THIRD_PARTY_LICENSES.json after a dependency changes
+licenses:
+	go run ./scripts/licenses
 
 ## icons: regenerate the platform icons from build/appicon.png
 icons:

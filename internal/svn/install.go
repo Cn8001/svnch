@@ -7,9 +7,36 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 var ErrNoInstaller = errors.New("no supported package manager found")
+
+// Setup is what the window needs to explain a missing svn instead of failing on every command.
+type Setup struct {
+	Binary  string `json:"binary"`  // empty while svn is missing
+	Version string `json:"version"` // e.g. 1.14.3
+	OS      string `json:"os"`      // runtime.GOOS, for the install instructions
+	Problem string `json:"problem"` // why the automatic install did not work
+}
+
+// Detect looks again on every call, so svn installed by hand while the app runs is picked up without a restart.
+func Detect(ctx context.Context, binary, problem string) Setup {
+	s := Setup{OS: runtime.GOOS}
+	if binary == "" || !fileExists(binary) {
+		path, err := exec.LookPath("svn")
+		if err != nil {
+			s.Problem = problem
+			return s
+		}
+		binary = path
+	}
+	s.Binary = binary
+	if out, err := exec.CommandContext(ctx, binary, "--version", "--quiet").Output(); err == nil {
+		s.Version = strings.TrimSpace(string(out))
+	}
+	return s
+}
 
 // EnsureInstalled returns the svn binary to run, installing Subversion through the OS package manager when it is missing.
 func EnsureInstalled(ctx context.Context) (string, error) {

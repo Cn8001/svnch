@@ -10,12 +10,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
 	ErrSvnNotFound    = errors.New("svn executable not found")
 	ErrNotWorkingCopy = errors.New("not a working copy")
 	ErrInvalidRequest = errors.New("invalid request")
+	ErrAuthFailed     = errors.New("authentication failed")
+	ErrCertUntrusted  = errors.New("server certificate not trusted")
 )
 
 type Runner interface {
@@ -24,16 +27,39 @@ type Runner interface {
 
 type ExecRunner struct {
 	binary string
+
+	mu       sync.Mutex
+	username string
+	password string
 }
 
 func NewExecRunner(binary string) *ExecRunner {
 	return &ExecRunner{binary: binary}
 }
 
+// SetCredentials keeps a login for the rest of the session; svn also saves it when its password store allows, but
+// without a keyring many systems refuse to store it, so every later command passes it again. Empty clears it.
+func (r *ExecRunner) SetCredentials(username, password string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.username, r.password = username, password
+}
+
 func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...string) ([]byte, error) {
-	full := append([]string{subcommand, "--non-interactive"}, args...)
+	full := []string{subcommand, "--non-interactive"}
+	r.mu.Lock()
+	username, password := r.username, r.password
+	r.mu.Unlock()
+	if username != "" {
+		// The password goes through stdin so it never shows in the process list.
+		full = append(full, "--username", username, "--password-from-stdin")
+	}
+	full = append(full, args...)
 
 	cmd := exec.CommandContext(ctx, r.binary, full...)
+	if username != "" {
+		cmd.Stdin = strings.NewReader(password + "\n")
+	}
 	cmd.Dir = dir
 	// Keeps stderr in English so error codes and messages read the same on every machine.
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
@@ -81,6 +107,10 @@ func (e *CommandError) Is(target error) bool {
 	switch e.Code {
 	case "E155007":
 		return target == ErrNotWorkingCopy
+	case "E215004", "E170001":
+		return target == ErrAuthFailed
+	case "E230001":
+		return target == ErrCertUntrusted
 	}
 	return false
 }

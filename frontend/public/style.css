@@ -32,6 +32,7 @@ button {
   padding: 3px 12px;
   box-shadow: 2px 2px 0 var(--ink);
   cursor: pointer;
+  white-space: nowrap;
 }
 button:hover:not(:disabled) { background: var(--select); }
 button:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: none; }

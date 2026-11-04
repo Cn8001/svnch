@@ -54,7 +54,8 @@
     font-weight: bold;
   }
   .x { padding: 0 7px; box-shadow: none; border-color: var(--paper); }
-  .body { padding: 12px; overflow: auto; display: grid; gap: 10px; }
+  /* max-content rows keep each block its own height and let the whole body scroll, instead of squeezing a scrolling child to nothing */
+  .body { padding: 12px; overflow: auto; display: grid; grid-auto-rows: max-content; gap: 10px; }
   footer {
     display: flex;
     justify-content: flex-end;

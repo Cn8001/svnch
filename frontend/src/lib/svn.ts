@@ -1,6 +1,13 @@
 import type { StatusEntry } from "../../bindings/github.com/Cn8001/svnch/internal/svn";
 
-export { SVNService as svn, AppService, UpdateService } from "../../bindings/github.com/Cn8001/svnch/internal/service";
+export {
+  SVNService as svn,
+  AppService,
+  UpdateService,
+  SetupService,
+  ServerService,
+} from "../../bindings/github.com/Cn8001/svnch/internal/service";
+export type { Server } from "../../bindings/github.com/Cn8001/svnch/internal/servers";
 export * from "../../bindings/github.com/Cn8001/svnch/internal/svn";
 export type { Info as AppInfo } from "../../bindings/github.com/Cn8001/svnch/internal/appinfo";
 
@@ -48,6 +55,12 @@ export function relative(wc: string, path: string): string {
 export function join(dir: string, name: string): string {
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
   return dir.replace(/[\\/]+$/, "") + sep + name;
+}
+
+// The Go side maps its errors to a stable code (service.MarshalError), which Wails puts on the error's cause.
+export function failureCode(e: unknown): string {
+  const cause = (e as { cause?: { code?: unknown } } | null)?.cause;
+  return typeof cause?.code === "string" ? cause.code : "";
 }
 
 // Wails hands Go errors over as an Error whose message is the full wrapped chain; the last svn line is the useful part.

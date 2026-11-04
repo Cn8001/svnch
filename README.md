@@ -7,27 +7,30 @@ A small desktop client for Subversion.
 svnch requires `svn` cli commands.
 
 
-## Status
+## What it does
 
-Early. Only `info` works for now; checkout, update, status, commit, log
-and diff come next.
+Check out, update and commit; see what changed and the diff of each file;
+add, delete, revert and rename from a right-click; read the log; merge and
+shelve. Saved servers and a repository browser mean you never type a URL
+twice.
 
 
 ## Building
 
 You need Go, Node.js and the Wails v3 CLI.
 
-    wails3 dev       run while developing
-    wails3 build     build bin/svnch
+    make dev         run while developing
+    make             build bin/svnch
 
 
 ## Subversion
 
-If `svn` is not installed, svnch installs it on first start (apt, dnf,
-pacman or zypper on Linux, Homebrew on macOS, winget on Windows).
+If `svn` is not installed, svnch tries to install it on first start (apt,
+dnf, pacman or zypper on Linux, Homebrew on macOS, winget on Windows), and
+shows how to do it by hand when it cannot.
 
-Passwords are read from svn's own cache. For a new server, run
-`svn info <url>` once in a terminal.
+When a server asks for a password, svnch asks you. svn keeps it in your
+system keyring where it can.
 
 
 ## License

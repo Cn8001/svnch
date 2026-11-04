@@ -9,12 +9,36 @@ import (
 	"github.com/Cn8001/svnch/internal/svn"
 )
 
-type SVNService struct {
-	runner svn.Runner
+// Credentials is the runner's session login, kept apart from Runner so tests and read-only callers need not fake it.
+type Credentials interface {
+	SetCredentials(username, password string)
 }
 
-func New(runner svn.Runner) *SVNService {
-	return &SVNService{runner: runner}
+type SVNService struct {
+	runner svn.Runner
+	creds  Credentials
+}
+
+func New(runner svn.Runner, creds Credentials) *SVNService {
+	return &SVNService{runner: runner, creds: creds}
+}
+
+// Login checks the credentials against url and keeps them for the session; a wrong password is cleared again so the
+// next command fails with the same auth error instead of a confusing one.
+func (s *SVNService) Login(ctx context.Context, url, username, password string) error {
+	if url == "" || username == "" {
+		return fmt.Errorf("login needs a url and a username: %w", svn.ErrInvalidRequest)
+	}
+	s.creds.SetCredentials(username, password)
+	if _, err := s.runner.Run(ctx, "", "info", svn.InfoArgs(url)...); err != nil {
+		s.creds.SetCredentials("", "")
+		return fmt.Errorf("login to %s: %w", url, err)
+	}
+	return nil
+}
+
+func (s *SVNService) Logout() {
+	s.creds.SetCredentials("", "")
 }
 
 // run takes the args builder's error as well, so each command reads as one line of build, run, parse.

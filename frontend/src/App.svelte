@@ -7,17 +7,20 @@
   import DiffView from "./lib/DiffView.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
   import Modal from "./lib/Modal.svelte";
+  import SvnMissing from "./lib/SvnMissing.svelte";
+  import RepoBrowser from "./lib/RepoBrowser.svelte";
   import {
     svn,
     AppService,
     UpdateService,
+    SetupService,
+    ServerService,
+    failureCode,
+    type Server,
+    type Setup,
     type AppInfo,
-    CheckoutRequest,
-    CommitRequest,
+    type CheckoutRequest,
     Depth,
-    DiffRequest,
-    LogRequest,
-    MergeRequest,
     errorText,
     hasChanges,
     isVersioned,
@@ -51,7 +54,14 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "login" | "repos" | "svn";
+
+  let setup = $state<Setup | null>(null);
+  let checkingSvn = $state(false);
+  let servers: Server[] = $state([]);
+  let login = $state({ url: "", username: "", password: "", error: "", busy: false });
+  let loginDone: ((ok: boolean) => void) | null = null;
+  let loginBack: ModalKind | null = null;
 
   let appInfo: AppInfo | null = $state(null);
   let updateNote = $state("");
@@ -69,27 +79,97 @@
 
   const failed = Symbol("failed");
 
-  // Every svn call goes through here so the status bar, the cancel button and error reporting behave the same.
-  async function run<T>(label: string, p: Promise<T> & { cancel?: () => void }): Promise<T | typeof failed> {
-    let cancelled = false;
-    busy = label;
-    error = "";
-    notice = "";
-    cancelBusy = () => {
-      cancelled = true;
-      p.cancel?.();
-    };
-    try {
-      return await p;
-    } catch (e) {
-      error = cancelled ? "Cancelled." : errorText(e);
-      errorFull = cancelled ? "" : e instanceof Error ? e.message : String(e);
-      return failed;
-    } finally {
-      busy = "";
-      cancelBusy = null;
+  // Every svn call goes through here so the status bar, the cancel button, error reporting and the login prompt behave
+  // the same. make is called again after a login, so a command that hit a password-protected server just carries on.
+  async function run<T>(label: string, make: () => Promise<T> & { cancel?: () => void }, url = ""): Promise<T | typeof failed> {
+    for (let attempt = 0; ; attempt++) {
+      let cancelled = false;
+      const p = make();
+      busy = label;
+      error = "";
+      notice = "";
+      cancelBusy = () => {
+        cancelled = true;
+        p.cancel?.();
+      };
+      try {
+        return await p;
+      } catch (e) {
+        busy = "";
+        cancelBusy = null;
+        const code = cancelled ? "CANCELLED" : failureCode(e);
+        const where = url || info?.repositoryRoot || "";
+        if (code === "AUTH" && attempt < 3 && where && (await askLogin(where, attempt ? "That did not work, try again." : ""))) continue;
+        if (code === "CERT") {
+          textBox = {
+            title: "Untrusted server certificate",
+            text: `${errorText(e)}\n\nsvn does not trust this server's HTTPS certificate. Check it once in a terminal and accept it permanently:\n\n  svn info ${where || "<url>"}\n\nthen press (p) when svn asks.`,
+          };
+          modal = "text";
+        }
+        if (code === "SVN_MISSING") await checkSvn();
+        error = cancelled ? "Cancelled." : errorText(e);
+        errorFull = cancelled ? "" : e instanceof Error ? e.message : String(e);
+        return failed;
+      } finally {
+        busy = "";
+        cancelBusy = null;
+      }
     }
   }
+
+  function askLogin(url: string, message = ""): Promise<boolean> {
+    const known = servers.find((s) => url.startsWith(s.url));
+    login = { url, username: known?.username || login.username, password: "", error: message, busy: false };
+    loginBack = modal === "login" ? loginBack : modal;
+    modal = "login";
+    return new Promise((resolve) => (loginDone = resolve));
+  }
+
+  function finishLogin(ok: boolean) {
+    modal = loginBack;
+    loginBack = null;
+    loginDone?.(ok);
+    loginDone = null;
+  }
+
+  async function submitLogin() {
+    if (!login.username) return;
+    login.busy = true;
+    login.error = "";
+    try {
+      await svn.Login(login.url, login.username, login.password);
+    } catch (e) {
+      login.busy = false;
+      login.error = failureCode(e) === "AUTH" ? "Wrong username or password." : errorText(e);
+      return;
+    }
+    login.busy = false;
+    const known = servers.find((s) => login.url.startsWith(s.url));
+    if (known && known.username !== login.username) {
+      try {
+        await ServerService.Save({ ...known, username: login.username });
+        await loadServers();
+      } catch {}
+    }
+    finishLogin(true);
+  }
+
+  async function loadServers() {
+    try {
+      servers = (await ServerService.List()) ?? [];
+    } catch {}
+  }
+
+  async function checkSvn() {
+    checkingSvn = true;
+    try {
+      setup = await SetupService.Status();
+    } catch {}
+    checkingSvn = false;
+  }
+
+  let svnMissing = $derived(!!setup && !setup.binary);
 
   function entry(path: string): StatusEntry | undefined {
     return entries.find((e) => e.path === path);
@@ -112,7 +192,7 @@
   }
 
   async function openWC(dir: string) {
-    const i = await run(`Reading ${dir}`, svn.Info(dir));
+    const i = await run(`Reading ${dir}`, () => svn.Info(dir));
     if (i === failed) return;
     info = i;
     wc = i.workingCopyRoot || dir;
@@ -130,9 +210,9 @@
 
   async function refresh() {
     if (!wc) return;
-    const r = await run("Reading status", svn.Status(wc));
+    const r = await run("Reading status", () => svn.Status(wc));
     if (r === failed) return;
-    entries = r.sort((a, b) => a.path.localeCompare(b.path));
+    entries = (r ?? []).sort((a, b) => a.path.localeCompare(b.path));
     for (const p of [...checked]) if (!entry(p)) checked.delete(p);
     if (focused && !entry(focused)) clearDiff();
     else if (focused) await showDiff(focused);
@@ -160,7 +240,7 @@
     const seq = ++diffSeq;
     diffLoading = true;
     try {
-      const text = await svn.Diff(new DiffRequest({ target: path, change: 0 }));
+      const text = await svn.Diff({ target: path, change: 0 });
       if (seq === diffSeq) diffText = text;
     } catch (err) {
       if (seq === diffSeq) error = errorText(err);
@@ -176,7 +256,7 @@
     diffText = "";
     diffLoading = true;
     try {
-      const text = await svn.Diff(new DiffRequest({ target, change: rev }));
+      const text = await svn.Diff({ target, change: rev });
       if (seq === diffSeq) diffText = text;
     } catch (err) {
       if (seq === diffSeq) error = errorText(err);
@@ -202,13 +282,13 @@
   }
 
   async function add(paths: string[]) {
-    if ((await run("Adding", svn.Add(paths))) !== failed) notice = `Added ${paths.length} item(s).`;
+    if ((await run("Adding", () => svn.Add(paths))) !== failed) notice = `Added ${paths.length} item(s).`;
     await refresh();
   }
 
   function revert(paths: string[]) {
     ask("Revert", `Throw away local changes in:\n\n${names(paths)}`, "Revert", async () => {
-      if ((await run("Reverting", svn.Revert(paths))) !== failed) notice = `Reverted ${paths.length} item(s).`;
+      if ((await run("Reverting", () => svn.Revert(paths))) !== failed) notice = `Reverted ${paths.length} item(s).`;
       await refresh();
     });
   }
@@ -218,7 +298,7 @@
       ? `Stop versioning these, but keep the files on disk:\n\n${names(paths)}`
       : `Delete these from disk and schedule them for removal:\n\n${names(paths)}`;
     ask(keepLocal ? "Remove from svn" : "Delete", text, keepLocal ? "Remove" : "Delete", async () => {
-      if ((await run("Deleting", svn.Delete(paths, keepLocal))) !== failed) notice = `Scheduled ${paths.length} item(s) for deletion.`;
+      if ((await run("Deleting", () => svn.Delete(paths, keepLocal))) !== failed) notice = `Scheduled ${paths.length} item(s) for deletion.`;
       await refresh();
     });
   }
@@ -231,7 +311,7 @@
   async function submitMove() {
     if (!mv.to || mv.to === mv.from) return;
     modal = null;
-    if ((await run("Moving", svn.Move(mv.from, mv.to))) !== failed) notice = `Moved to ${relative(wc, mv.to)}.`;
+    if ((await run("Moving", () => svn.Move(mv.from, mv.to))) !== failed) notice = `Moved to ${relative(wc, mv.to)}.`;
     await refresh();
   }
 
@@ -267,8 +347,8 @@
       const e = entry(p);
       return e && !isVersioned(e);
     });
-    if (toAdd.length && (await run("Adding new files", svn.Add(toAdd))) === failed) return;
-    const rev = await run("Committing", svn.Commit(new CommitRequest({ paths: sel.length ? sel : [wc], message })));
+    if (toAdd.length && (await run("Adding new files", () => svn.Add(toAdd))) === failed) return;
+    const rev = await run("Committing", () => svn.Commit({ paths: sel.length ? sel : [wc], message }));
     if (rev === failed) return;
     message = "";
     checked.clear();
@@ -279,16 +359,51 @@
 
   async function update() {
     if (!wc || busy) return;
-    const rev = await run("Updating", svn.Update([wc]));
+    const rev = await run("Updating", () => svn.Update([wc]));
     if (rev === failed) return;
     await refresh();
     await reloadInfo();
     notice = `At revision ${rev}.`;
   }
 
-  function openCheckout() {
-    co = { url: "", path: "", revision: "", depth: Depth.DepthDefault };
+  function openCheckout(url = "") {
+    co = { url, path: "", revision: "", depth: Depth.DepthDefault };
     modal = "checkout";
+  }
+
+  async function openRepos() {
+    await loadServers();
+    modal = "repos";
+  }
+
+  async function listRepo(url: string) {
+    const r = await run(`Listing ${url}`, () => svn.List(url), url);
+    return r === failed ? null : (r ?? []);
+  }
+
+  async function saveServer(s: Server) {
+    try {
+      await ServerService.Save(s);
+      await loadServers();
+      return true;
+    } catch (e) {
+      error = errorText(e);
+      return false;
+    }
+  }
+
+  async function removeServer(url: string) {
+    try {
+      await ServerService.Remove(url);
+    } catch (e) {
+      error = errorText(e);
+    }
+    await loadServers();
+  }
+
+  async function forgetLogin() {
+    await svn.Logout();
+    updateNote = "Forgotten for this session. svn may still have the password saved in its own store.";
   }
 
   async function browseCheckoutDir() {
@@ -302,8 +417,8 @@
     const rev = Number(co.revision || 0);
     if (!co.url || !co.path || !Number.isInteger(rev) || rev < 0) return;
     modal = null;
-    const req = new CheckoutRequest({ url: co.url.trim(), path: co.path.trim(), revision: rev, depth: co.depth });
-    const r = await run(`Checking out ${req.url}`, svn.Checkout(req));
+    const req: CheckoutRequest = { url: co.url.trim(), path: co.path.trim(), revision: rev, depth: co.depth };
+    const r = await run(`Checking out ${req.url}`, () => svn.Checkout(req), req.url);
     if (r === failed) return;
     await openWC(req.path);
     notice = `Checked out revision ${r}.`;
@@ -311,9 +426,9 @@
 
   async function openLog(target: string) {
     log = { target, entries: [], selected: 0 };
-    const r = await run("Reading log", svn.Log(new LogRequest({ target, limit: 200, verbose: true })));
+    const r = await run("Reading log", () => svn.Log({ target, limit: 200, verbose: true }), target);
     if (r === failed) return;
-    log.entries = r;
+    log.entries = r ?? [];
     modal = "log";
   }
 
@@ -325,7 +440,7 @@
   async function submitMerge() {
     const change = Number(mg.change || 0);
     if (!mg.source || !Number.isInteger(change) || change < 0) return;
-    const out = await run(mg.dryRun ? "Trying merge" : "Merging", svn.Merge(new MergeRequest({ source: mg.source.trim(), target: wc, change, dryRun: mg.dryRun })));
+    const out = await run(mg.dryRun ? "Trying merge" : "Merging", () => svn.Merge({ source: mg.source.trim(), target: wc, change, dryRun: mg.dryRun }));
     if (out === failed) return;
     mg.output = out.trim() || "Nothing to merge.";
     if (!mg.dryRun) await refresh();
@@ -339,25 +454,25 @@
   async function submitShelve() {
     if (!sh.name.trim()) return;
     modal = null;
-    if ((await run("Shelving", svn.Shelve(wc, sh.name.trim(), sh.message))) !== failed) notice = `Shelved as ${sh.name.trim()}.`;
+    if ((await run("Shelving", () => svn.Shelve(wc, sh.name.trim(), sh.message))) !== failed) notice = `Shelved as ${sh.name.trim()}.`;
     await refresh();
   }
 
   async function openUnshelve() {
-    const r = await run("Reading shelves", svn.Shelves(wc));
+    const r = await run("Reading shelves", () => svn.Shelves(wc));
     if (r === failed) return;
-    shelves = r;
+    shelves = r ?? [];
     modal = "unshelve";
   }
 
   async function unshelve(name: string) {
     modal = null;
-    if ((await run("Unshelving", svn.Unshelve(wc, name))) !== failed) notice = `Unshelved ${name}.`;
+    if ((await run("Unshelving", () => svn.Unshelve(wc, name))) !== failed) notice = `Unshelved ${name}.`;
     await refresh();
   }
 
   async function openHelp(topic = "") {
-    const r = await run("Reading help", svn.Help(topic));
+    const r = await run("Reading help", () => svn.Help(topic));
     if (r === failed) return;
     help = { topic, text: r };
     modal = "help";
@@ -394,7 +509,8 @@
       title: "File",
       items: [
         { label: "Open working copy...", action: openFolder, hint: "Ctrl+O", disabled: !!busy },
-        { label: "Checkout...", action: openCheckout, disabled: !!busy },
+        { label: "Checkout...", action: () => openCheckout(), disabled: !!busy || svnMissing },
+        { label: "Browse repositories...", action: openRepos, hint: "Ctrl+B", disabled: !!busy || svnMissing },
         { separator: true as const },
         { label: "Quit", action: () => Application.Quit() },
       ],
@@ -417,6 +533,7 @@
       title: "Help",
       items: [
         { label: "svn command reference", action: () => openHelp() },
+        { label: "Installing svn", action: () => { checkSvn(); modal = "svn"; } },
         { label: "svnch on GitHub", action: () => Browser.OpenURL(REPO_URL) },
       ],
     },
@@ -433,6 +550,9 @@
     } else if (mod && e.key === "o") {
       e.preventDefault();
       openFolder();
+    } else if (mod && e.key === "b") {
+      e.preventDefault();
+      if (!svnMissing) openRepos();
     } else if (mod && e.key === "u") {
       e.preventDefault();
       update();
@@ -442,7 +562,10 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
+    loadServers();
+    await checkSvn();
+    if (svnMissing) return;
     let last = "";
     try {
       last = localStorage.getItem(LAST_WC) ?? "";
@@ -457,7 +580,8 @@
   <MenuBar {menus} />
 
   <div class="toolbar">
-    <button onclick={openFolder} disabled={!!busy}>Open...</button>
+    <button onclick={openFolder} disabled={!!busy || svnMissing}>Open...</button>
+    <button onclick={openRepos} disabled={!!busy || svnMissing}>Repos</button>
     <button onclick={update} disabled={!wc || !!busy}>Update</button>
     <button onclick={refresh} disabled={!wc || !!busy}>Refresh</button>
     <button onclick={() => openLog(wc)} disabled={!wc || !!busy}>Log</button>
@@ -470,13 +594,19 @@
     {/if}
   </div>
 
-  {#if !wc}
+  {#if svnMissing}
+    <div class="welcome">
+      <img src="/appicon.png" alt="" />
+      <SvnMissing {setup} checking={checkingSvn} oncheck={checkSvn} />
+    </div>
+  {:else if !wc}
     <div class="welcome">
       <img src="/appicon.png" alt="" />
       <p>Open a working copy, or check one out from a repository.</p>
       <div class="actions">
         <button class="primary" onclick={openFolder} disabled={!!busy}>Open working copy...</button>
-        <button onclick={openCheckout} disabled={!!busy}>Checkout...</button>
+        <button onclick={() => openCheckout()} disabled={!!busy}>Checkout...</button>
+        <button onclick={openRepos} disabled={!!busy}>Browse repositories...</button>
       </div>
     </div>
   {:else}
@@ -523,7 +653,16 @@
 
 {#if modal === "checkout"}
   <Modal title="Checkout" onclose={() => (modal = null)}>
-    <label><span>Repository URL</span><input bind:value={co.url} placeholder="https://svn.example.org/repo/trunk" /></label>
+    <label>
+      <span>Repository URL</span>
+      <div class="row">
+        <input bind:value={co.url} list="saved-servers" placeholder="https://svn.example.org/repo/trunk" />
+        <button type="button" onclick={openRepos}>Browse...</button>
+      </div>
+    </label>
+    <datalist id="saved-servers">
+      {#each servers as s (s.url)}<option value={s.url}>{s.name}</option>{/each}
+    </datalist>
     <label>
       <span>Into folder</span>
       <div class="row"><input bind:value={co.path} placeholder="/home/me/work/trunk" /><button type="button" onclick={browseCheckoutDir}>Browse...</button></div>
@@ -649,9 +788,28 @@
         {#if appInfo}
           <p class="muted">{appInfo.platform} · {appInfo.go}{appInfo.wails ? ` · Wails ${appInfo.wails}` : ""}</p>
         {/if}
-        <button onclick={() => Browser.OpenURL(REPO_URL)}>github.com/Cn8001/svnch</button>
+        <div class="row">
+          <button onclick={() => Browser.OpenURL(REPO_URL)}>github.com/Cn8001/svnch</button>
+          <button onclick={() => (modal = "licenses")} disabled={!appInfo}>Third-party licences</button>
+        </div>
       </div>
     </div>
+  </Modal>
+{:else if modal === "licenses"}
+  <Modal title="Third-party licences" wide onclose={() => (modal = "about")}>
+    {#if appInfo?.notices}<pre class="output notices">{appInfo.notices}</pre>{/if}
+    <div class="licenses">
+      {#each appInfo?.licenses ?? [] as l (l.name + l.version)}
+        <details>
+          <summary><b>{l.name}</b> <span class="muted">{l.version}</span> <span class="lic">{l.license || "see text"}</span></summary>
+          <pre class="output">{l.text}</pre>
+          {#if l.notice}<pre class="output">{l.notice}</pre>{/if}
+        </details>
+      {/each}
+    </div>
+    {#snippet footer()}
+      <button onclick={() => (modal = "about")}>Back</button>
+    {/snippet}
   </Modal>
 {:else if modal === "settings"}
   <Modal title="Settings" onclose={() => (modal = null)}>
@@ -662,7 +820,50 @@
       </div>
       <button onclick={checkUpdates}>Check for updates</button>
     </div>
+    <div class="setting">
+      <div>
+        <b>Login</b>
+        <p class="muted">Drop the username and password svnch keeps for this session.</p>
+      </div>
+      <button onclick={forgetLogin}>Forget login</button>
+    </div>
     {#if updateNote}<p>{updateNote}</p>{/if}
+  </Modal>
+{:else if modal === "login"}
+  <Modal title="Login" onclose={() => finishLogin(false)}>
+    <form class="login" onsubmit={(e) => { e.preventDefault(); submitLogin(); }}>
+      <p>The server asks who you are.</p>
+      <p class="muted where" title={login.url}>{login.url}</p>
+      <!-- svelte-ignore a11y_autofocus -->
+      <label><span>Username</span><input bind:value={login.username} autofocus={!login.username} autocomplete="username" /></label>
+      <!-- svelte-ignore a11y_autofocus -->
+      <label><span>Password</span><input type="password" bind:value={login.password} autofocus={!!login.username} autocomplete="current-password" /></label>
+      {#if login.error}<p class="error">{login.error}</p>{/if}
+      <p class="muted fine">svn saves the password in your system keyring when it can. Where it cannot, svnch keeps it until you close the app.</p>
+      <div class="end">
+        <button type="button" onclick={() => finishLogin(false)}>Cancel</button>
+        <button class="primary" type="submit" disabled={!login.username || login.busy}>{login.busy ? "Checking..." : "Log in"}</button>
+      </div>
+    </form>
+  </Modal>
+{:else if modal === "repos"}
+  <Modal title="Repositories" wide onclose={() => (modal = null)}>
+    <RepoBrowser
+      {servers}
+      list={listRepo}
+      onsave={saveServer}
+      onremove={removeServer}
+      oncheckout={(url) => openCheckout(url)}
+      onlog={(url) => openLog(url)}
+    />
+  </Modal>
+{:else if modal === "svn"}
+  <Modal title="Installing svn" onclose={() => (modal = null)}>
+    {#if setup?.binary}
+      <p>svn {setup.version} is installed at <code>{setup.binary}</code>.</p>
+    {:else}
+      <SvnMissing {setup} checking={checkingSvn} oncheck={checkSvn} />
+    {/if}
   </Modal>
 {/if}
 
@@ -746,7 +947,22 @@
   .about img { width: 112px; height: 112px; }
   .about h1 { margin: 0 0 6px; font-size: 20px; }
   .about p { margin: 0 0 10px; }
+  .about .row { flex-wrap: wrap; align-items: center; }
   .ver { font-weight: normal; color: var(--muted); }
   .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
   .setting p { margin: 4px 0 0; }
+  .setting + .setting { margin-top: 8px; padding-top: 10px; border-top: 1px dotted var(--muted); }
+  .login { display: grid; gap: 10px; }
+  .login p { margin: 0; }
+  .login .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fine { font-size: 12px; }
+  .end { display: flex; justify-content: flex-end; gap: 8px; }
+  .notices { max-height: 28vh; }
+  .licenses { border: 2px solid var(--ink); background: var(--field); }
+  .licenses details { border-bottom: 1px dotted rgba(36, 33, 30, 0.25); }
+  .licenses summary { padding: 4px 8px; cursor: pointer; }
+  .licenses summary:hover { background: var(--select); }
+  .licenses details[open] summary { background: var(--cream); }
+  .licenses details .output { margin: 6px 8px 8px; max-height: 40vh; }
+  .lic { float: right; }
 </style>

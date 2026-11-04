@@ -9,14 +9,26 @@ import (
 )
 
 type Info struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Description string `json:"description"`
-	Author      string `json:"author"`
-	Copyright   string `json:"copyright"`
-	Go          string `json:"go"`
-	Wails       string `json:"wails"`
-	Platform    string `json:"platform"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Description string    `json:"description"`
+	Author      string    `json:"author"`
+	Copyright   string    `json:"copyright"`
+	Go          string    `json:"go"`
+	Wails       string    `json:"wails"`
+	Platform    string    `json:"platform"`
+	Notices     string    `json:"notices"`  // THIRD_PARTY_NOTICES.md
+	Licenses    []License `json:"licenses"` // THIRD_PARTY_LICENSES.json, written by scripts/licenses
+}
+
+// License is one shipped package's licence in full, with its NOTICE where it has one: what MIT, BSD, ISC and
+// Apache-2.0 ask to go with every copy.
+type License struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	License string `json:"license"`
+	Text    string `json:"text"`
+	Notice  string `json:"notice,omitempty"`
 }
 
 // FromConfig reads the info block of build/config.yml. It is a few quoted keys, so a line match does without a YAML parser.
