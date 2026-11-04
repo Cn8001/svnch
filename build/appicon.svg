@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect x="100" y="100" width="848" height="848" rx="150" fill="#24211e"/>
+  <rect x="76" y="76" width="848" height="848" rx="150" fill="#24211e"/>
+  <rect x="100" y="100" width="800" height="800" rx="126" fill="#ebe4d2"/>
+  <line x1="404" y1="276" x2="404" y2="748" stroke="#24211e" stroke-width="44" stroke-linecap="round"/>
+  <line x1="404" y1="420" x2="640" y2="572" stroke="#24211e" stroke-width="44" stroke-linecap="round"/>
+  <line x1="640" y1="572" x2="640" y2="700" stroke="#24211e" stroke-width="44" stroke-linecap="round"/>
+  <circle cx="404" cy="276" r="54" fill="#24211e"/>
+  <circle cx="404" cy="276" r="28" fill="#ebe4d2"/>
+  <circle cx="404" cy="420" r="54" fill="#24211e"/>
+  <circle cx="404" cy="420" r="28" fill="#ebe4d2"/>
+  <circle cx="404" cy="584" r="54" fill="#24211e"/>
+  <circle cx="404" cy="584" r="28" fill="#ebe4d2"/>
+  <circle cx="640" cy="700" r="54" fill="#24211e"/>
+  <circle cx="640" cy="700" r="28" fill="#ebe4d2"/>
+  <circle cx="404" cy="748" r="60" fill="#24211e"/>
+  <circle cx="404" cy="748" r="36" fill="#a8432c"/>
+</svg>

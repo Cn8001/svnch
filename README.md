@@ -1,59 +1,71 @@
-# Welcome to Your New Wails3 Project!
+<p align="center"><img src="build/appicon.png" width="112" alt="svnch"></p>
 
-Congratulations on generating your Wails3 application! This README will guide you through the next steps to get your project up and running.
+# svnch
 
-## Getting Started
+A small desktop client for Subversion.
 
-1. Navigate to your project directory in the terminal.
+svnch is a thin window over the `svn` command line tool. It does not link
+against libsvn, keep its own idea of your working copy, or rename things
+that already have perfectly good names. When you click something, it runs
+the same `svn` command you would have typed and reads back the `--xml`
+output.
 
-2. To run your application in development mode, use the following command:
+It is for people who still keep their code in a repository with a trunk,
+a few branches and revision numbers that only go up.
 
-   ```
-   wails3 dev
-   ```
 
-   This will start your application and enable hot-reloading for both frontend and backend changes.
+## Status
 
-3. To build your application for production, use:
+Early. Commands are added one at a time, each with its own model and
+parser.
 
-   ```
-   wails3 build
-   ```
+    info        works
+    checkout    next
+    update
+    status
+    commit
+    log
+    diff
+    add, delete, revert
 
-   This will create a production-ready executable in the `build` directory.
 
-## Exploring Wails3 Features
+## Requirements
 
-Now that you have your project set up, it's time to explore the features that Wails3 offers:
+- Go 1.26 or newer
+- Node.js with npm
+- Wails v3: `go install github.com/wailsapp/wails/v3/cmd/wails3@latest`
+- Subversion 1.8 or newer (svnch can install it, see below)
 
-1. **Check out the examples**: The best way to learn is by example. Visit the `examples` directory in the `v3/examples` directory to see various sample applications.
 
-2. **Run an example**: To run any of the examples, navigate to the example's directory and use:
+## Building
 
-   ```
-   go run .
-   ```
+    wails3 dev       run with live reload
+    wails3 build     binary ends up in bin/svnch
 
-   Note: Some examples may be under development during the alpha phase.
 
-3. **Explore the documentation**: Visit the [Wails3 documentation](https://v3.wails.io/) for in-depth guides and API references.
+## Subversion
 
-4. **Join the community**: Have questions or want to share your progress? Join the [Wails Discord](https://discord.gg/JDdSxwjhGf) or visit the [Wails discussions on GitHub](https://github.com/wailsapp/wails/discussions).
+On startup svnch looks for `svn` on your PATH. If it is missing, it asks
+the system package manager to install it:
 
-## Project Structure
+    Linux      pkexec with apt-get, dnf, pacman or zypper
+    macOS      brew install subversion
+    Windows    winget install Slik.Subversion
 
-Take a moment to familiarize yourself with your project structure:
+If none of these are available, svnch exits and says so. Install
+Subversion by hand and start it again.
 
-- `frontend/`: Contains your frontend code (HTML, CSS, JavaScript/TypeScript)
-- `main.go`: The entry point of your Go backend
-- `app.go`: Define your application structure and methods here
-- `wails.json`: Configuration file for your Wails project
+Every command runs with `--non-interactive` and `LC_ALL=C`. svn never
+waits on a password prompt the window cannot show, and its errors read
+the same on every machine. Credentials come from svn's own cache in
+`~/.subversion/auth`, so for a new server run `svn info <url>` once in a
+terminal and save the password there.
 
-## Next Steps
 
-1. Modify the frontend in the `frontend/` directory to create your desired UI.
-2. Add backend functionality in `main.go`.
-3. Use `wails3 dev` to see your changes in real-time.
-4. When ready, build your application with `wails3 build`.
+## Layout
 
-Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+    main.go              wires everything together
+    internal/svn/        runner, installer, one file per command
+    internal/service/    what the frontend can call
+    frontend/            Svelte UI
+    build/               packaging; appicon.svg is the logo source
