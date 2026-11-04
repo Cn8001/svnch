@@ -371,6 +371,14 @@
     return { base, line: decodeURIComponent(m[2]), sub: m[3] ?? "", from: `${base}/${m[2]}` };
   }
 
+  // atRoot is a working copy of the whole repository in a repository without trunk and branches. svn would copy the
+  // root into ^/branches, but each such branch holds every branch before it, so svnch does not offer it there.
+  let atRoot = $derived.by(() => {
+    const i: Info | null = info;
+    if (!i || layout()?.line) return false;
+    return i.url.replace(/\/+$/, "") === i.repositoryRoot.replace(/\/+$/, "");
+  });
+
   function urlOf(path: string): string {
     if (!info) return path;
     if (path === wc) return info.url;
@@ -448,18 +456,27 @@
     notice = `Branch ${name} created in r${rev}${switchAfter ? ", and this working copy is on it now" : ""}.`;
   }
 
+  // openSwitch lists what the server really has: trunk when there is one, otherwise the folder the working copy
+  // came from (the whole repository when it has no layout), then each branch. Each listing gets CheckConnection's
+  // ten seconds, because Commit and Switch wait while a command runs.
   async function openSwitch() {
     const l = layout();
-    if (!l) return;
-    sw = { url: info?.url ?? "", choices: [{ label: "trunk", url: `${l.base}/trunk` }], loading: true };
+    const i = info;
+    if (!l || !i) return;
+    const root = i.repositoryRoot.replace(/\/+$/, "");
+    sw = { url: i.url, choices: [], loading: true };
     modal = "switch";
-    const r = await run("Reading branches", () => svn.List(`${l.base}/branches`), l.base);
-    sw.loading = false;
-    if (r === failed) {
-      error = "";
-      return;
+    const top = await run("Reading branches", () => svn.CheckConnection(l.base), l.base);
+    const dirs = top === failed ? [] : (top ?? []).filter((e) => e.kind === "dir").map((e) => e.name);
+    if (dirs.includes("trunk")) sw.choices.push({ label: "trunk", url: `${l.base}/trunk` });
+    else sw.choices.push({ label: l.base === root ? "whole repository (^/)" : `^${l.base.slice(root.length)}`, url: l.base });
+    if (dirs.includes("branches")) {
+      const r = await run("Reading branches", () => svn.CheckConnection(`${l.base}/branches`), l.base);
+      if (r !== failed) {
+        for (const e of r ?? []) if (e.kind === "dir") sw.choices.push({ label: `branches/${e.name}`, url: `${l.base}/branches/${encodeURIComponent(e.name)}` });
+      }
     }
-    for (const e of r ?? []) if (e.kind === "dir") sw.choices.push({ label: `branches/${e.name}`, url: `${l.base}/branches/${encodeURIComponent(e.name)}` });
+    sw.loading = false;
   }
 
   async function submitSwitch(url: string) {
@@ -1254,24 +1271,43 @@
   </Modal>
 {:else if modal === "branch" && info}
   <Modal title="New branch" onclose={() => (modal = null)}>
-    <p class="muted">
-      Copies {layout()?.line || info.relativeUrl} on the server as a new branch, in one commit. No files are transferred.
-    </p>
-    <!-- svelte-ignore a11y_autofocus -->
-    <label><span>Name</span><input bind:value={br.name} placeholder="feature-login" autofocus /></label>
-    {#if br.name.trim()}<p class="muted fine mono">{branchURL(br.name)}</p>{/if}
-    <label><span>Message</span><input bind:value={br.message} placeholder={`Create branch ${br.name.trim() || "..."}`} /></label>
-    <label class="check"><input type="checkbox" bind:checked={br.switchAfter} /> Switch this working copy to it</label>
-    {#if !layout()?.line}<p class="muted fine">This repository has no trunk or branches folder; the branch goes under ^/branches.</p>{/if}
+    {#if atRoot}
+      <p>This working copy is the whole repository (<code>^/</code>), and the repository has no <code>trunk</code> and <code>branches</code> folders.</p>
+      <p class="muted">
+        A branch in svn is a copy of a folder. svn does let you copy the root into <code>^/branches</code>, but every
+        such branch holds the whole repository, the branches made before it included, so they nest deeper each time.
+        Branches need the usual layout: the files under <code>^/trunk</code>, branches under <code>^/branches</code>.
+        Moving the files there is a single commit, but it changes the address for everyone, so agree on it with your
+        team first. VisualSVN Server can also create new repositories with this layout.
+      </p>
+    {:else}
+      <p class="muted">
+        Copies {layout()?.line || info.relativeUrl} on the server as a new branch, in one commit. No files are transferred.
+      </p>
+      <!-- svelte-ignore a11y_autofocus -->
+      <label><span>Name</span><input bind:value={br.name} placeholder="feature-login" autofocus /></label>
+      {#if br.name.trim()}<p class="muted fine mono">{branchURL(br.name)}</p>{/if}
+      <label><span>Message</span><input bind:value={br.message} placeholder={`Create branch ${br.name.trim() || "..."}`} /></label>
+      <label class="check"><input type="checkbox" bind:checked={br.switchAfter} /> Switch this working copy to it</label>
+      {#if !layout()?.line}<p class="muted fine">This repository has no trunk or branches folder; the branch goes under ^/branches.</p>{/if}
+    {/if}
     {#snippet footer()}
-      <button onclick={() => (modal = null)}>Cancel</button>
-      <button class="primary" disabled={!br.name.trim() || /[\\/]/.test(br.name) || !!busy} onclick={submitBranch}>Create branch</button>
+      <button onclick={() => (modal = null)}>{atRoot ? "Close" : "Cancel"}</button>
+      {#if !atRoot}
+        <button class="primary" disabled={!br.name.trim() || /[\\/]/.test(br.name) || !!busy} onclick={submitBranch}>Create branch</button>
+      {/if}
     {/snippet}
   </Modal>
 {:else if modal === "switch" && info}
   <Modal title="Switch branch" onclose={() => (modal = null)}>
     <p class="muted">Points this working copy at another branch. Your local changes come along; files that differ are updated.</p>
-    <ul class="choices">
+    {#if !layout()?.line && !sw.loading && sw.choices.length <= 1}
+      <p class="muted fine">
+        {atRoot ? "This working copy is the whole repository, which has no trunk and branches folders" : "This repository has no trunk and branches folders"},
+        so there is nothing else to list. A url still works.
+      </p>
+    {/if}
+    {#if sw.choices.length || sw.loading}<ul class="choices">
       {#each sw.choices as c (c.url)}
         <li>
           <button class:sel={info.url.startsWith(c.url + "/") || info.url === c.url} onclick={() => submitSwitch(c.url)} disabled={!!busy}>
@@ -1280,8 +1316,8 @@
           </button>
         </li>
       {/each}
-      {#if sw.loading}<li class="muted">Reading branches...</li>{/if}
-    </ul>
+      {#if sw.loading}<li class="muted loadrow">Reading branches... <button class="small" onclick={() => cancelBusy?.()}>Stop</button></li>{/if}
+    </ul>{/if}
     <label><span>Or any url</span><input bind:value={sw.url} class="mono" /></label>
     {#snippet footer()}
       <button onclick={() => (modal = null)}>Cancel</button>
@@ -1431,7 +1467,10 @@
   .commit button { padding: 6px 12px; }
   .right { min-width: 0; min-height: 0; background: var(--bg); }
 
+  /* Above the modal backdrop, so Stop is reachable while a window is open. */
   .status {
+    position: relative;
+    z-index: 45;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1495,6 +1534,8 @@
   .choices button:hover:not(:disabled) { background: var(--hover); }
   .choices button.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
   .choices li.muted { padding: 5px 8px; }
+  .choices .loadrow { display: flex; align-items: center; justify-content: space-between; }
+  .choices .loadrow button { width: auto; font-family: inherit; border: 1px solid var(--line-strong); padding: 0 8px; }
   .where .branch { border: 0; background: transparent; padding: 1px 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
   .where .branch:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
