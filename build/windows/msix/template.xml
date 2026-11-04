@@ -10,13 +10,13 @@
     <Installer
         Path="svnch"
         Arguments=""
-        InstallLocation="C:\Program Files\My Company\My Product">
+        InstallLocation="C:\Program Files\Canercan Demir\svnch">
     </Installer>
     <PackageInformation
-        PackageName="My Product"
-        PackageDisplayName="My Product"
-        PublisherName="CN=My Company"
-        PublisherDisplayName="My Company"
+        PackageName="svnch"
+        PackageDisplayName="svnch"
+        PublisherName="CN=Canercan Demir"
+        PublisherDisplayName="Canercan Demir"
         Version="0.1.0.0"
         PackageDescription="A Subversion client">
         <Capabilities>
@@ -27,7 +27,7 @@
             <Application
                 Id="com.github.cn8001.svnch"
                 Description="A Subversion client"
-                DisplayName="My Product"
+                DisplayName="svnch"
                 ExecutableName="svnch"
                 EntryPoint="Windows.FullTrustApplication">
                 
@@ -41,8 +41,8 @@
         </Dependencies>
         <Properties>
             <Framework>false</Framework>
-            <DisplayName>My Product</DisplayName>
-            <PublisherDisplayName>My Company</PublisherDisplayName>
+            <DisplayName>svnch</DisplayName>
+            <PublisherDisplayName>Canercan Demir</PublisherDisplayName>
             <Description>A Subversion client</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>

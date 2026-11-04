@@ -5,7 +5,7 @@
 		<key>CFBundleExecutable</key>
 		<string>svnch</string>
 		<key>CFBundleGetInfoString</key>
-		<string>Some Product Comments</string>
+		<string>A Subversion client</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
 		<key>CFBundleIconName</key>
@@ -25,6 +25,6 @@
 		<key>NSHighResolutionCapable</key>
 		<string>true</string>
 		<key>NSHumanReadableCopyright</key>
-		<string>(c) 2025, My Company</string>
+		<string>(c) 2026 Canercan Demir, MIT License</string>
 	</dict>
 </plist>

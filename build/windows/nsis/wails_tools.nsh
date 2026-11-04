@@ -8,7 +8,7 @@
     !define INFO_PROJECTNAME "svnch"
 !endif
 !ifndef INFO_COMPANYNAME
-    !define INFO_COMPANYNAME "My Company"
+    !define INFO_COMPANYNAME "Canercan Demir"
 !endif
 !ifndef INFO_PRODUCTNAME
     !define INFO_PRODUCTNAME "svnch"
@@ -17,7 +17,7 @@
     !define INFO_PRODUCTVERSION "0.0.1"
 !endif
 !ifndef INFO_COPYRIGHT
-    !define INFO_COPYRIGHT "(c) 2025, My Company"
+    !define INFO_COPYRIGHT "(c) 2026 Canercan Demir, MIT License"
 !endif
 !ifndef PRODUCT_EXECUTABLE
     !define PRODUCT_EXECUTABLE "${INFO_PROJECTNAME}.exe"

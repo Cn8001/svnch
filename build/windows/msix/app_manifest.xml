@@ -9,13 +9,13 @@
   
   <Identity 
     Name="com.github.cn8001.svnch"
-    Publisher="CN=My Company"
+    Publisher="CN=Canercan Demir"
     Version="0.1.0.0" 
     ProcessorArchitecture="x64" />
   
   <Properties>
-    <DisplayName>My Product</DisplayName>
-    <PublisherDisplayName>My Company</PublisherDisplayName>
+    <DisplayName>svnch</DisplayName>
+    <PublisherDisplayName>Canercan Demir</PublisherDisplayName>
     <Description>A Subversion client</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -31,7 +31,7 @@
   <Applications>
     <Application Id="com.github.cn8001.svnch" Executable="svnch" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="My Product"
+        DisplayName="svnch"
         Description="A Subversion client"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"

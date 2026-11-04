@@ -5,11 +5,11 @@
 	"info": {
 		"0409": {
 			"ProductVersion": "0.0.1",
-			"CompanyName": "My Company",
+			"CompanyName": "Canercan Demir",
 			"FileDescription": "A Subversion client",
-			"LegalCopyright": "(c) 2025, My Company",
+			"LegalCopyright": "(c) 2026 Canercan Demir, MIT License",
 			"ProductName": "svnch",
-			"Comments": "Some Product Comments"
+			"Comments": "A Subversion client"
 		}
 	}
 }
