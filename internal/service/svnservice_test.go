@@ -414,7 +414,8 @@ func TestDiscard_RevertsAndDeletesOnlyWhatSvnCallsNew(t *testing.T) {
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("modified file was deleted: %v", err)
 	}
-	if len(runner.ran) != 2 || !strings.HasPrefix(runner.ran[1], "revert ") || !strings.HasSuffix(runner.ran[1], keep) {
+	// One revert of what was asked for, all below it included, not one per changed item.
+	if len(runner.ran) != 2 || runner.ran[1] != "revert --depth infinity -- "+wc {
 		t.Errorf("ran %q", runner.ran)
 	}
 }
