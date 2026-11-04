@@ -116,3 +116,21 @@ pre { margin: 0; user-select: text; }
 
 .muted { color: var(--muted); }
 .error { color: var(--danger); }
+
+/* Layout helpers the windows share. */
+.row { display: flex; gap: 8px; align-items: end; }
+.row > input { flex: 1; }
+.between { justify-content: space-between; align-items: center; }
+.wrap { flex-wrap: wrap; align-items: center; }
+.grow { flex: 1; }
+.end { display: flex; justify-content: flex-end; gap: 8px; }
+.check { display: flex; align-items: center; gap: 6px; }
+.note { white-space: pre-wrap; }
+.fine { font-size: 12px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+button.small { padding: 0 8px; font-size: 12px; }
+.output { max-height: 50vh; overflow: auto; padding: 10px; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius); white-space: pre-wrap; }
+.purpose { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: var(--accent-soft); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; user-select: text; }
