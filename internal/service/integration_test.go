@@ -140,6 +140,10 @@ func TestIntegration_EverySVNServiceMethod(t *testing.T) {
 	t.Run("info", func(t *testing.T) {
 		info, err := w.s.Info(ctx, wc)
 		w.must(err, "info")
+		// The root must read like the paths status prints, or nothing matches it on Windows.
+		if info.WorkingCopyRoot != wc {
+			t.Errorf("working copy root %q, want %q as status prints it", info.WorkingCopyRoot, wc)
+		}
 		if info.RelativeURL != "^/trunk" || info.URL != trunk || info.RepositoryRoot != w.repo {
 			t.Errorf("info = %+v", info)
 		}

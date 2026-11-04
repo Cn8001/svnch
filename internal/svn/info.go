@@ -3,6 +3,7 @@ package svn
 import (
 	"encoding/xml"
 	"fmt"
+	"path/filepath"
 	"time"
 )
 
@@ -40,5 +41,9 @@ func ParseInfo(data []byte) (Info, error) {
 	if len(doc.Entries) == 0 {
 		return Info{}, fmt.Errorf("parse svn info: no entry in output")
 	}
-	return doc.Entries[0], nil
+	info := doc.Entries[0]
+	// svn writes the working copy root with forward slashes even on Windows, where every other path it prints, status
+	// included, uses backslashes; one form keeps "is this file under the root" answerable.
+	info.WorkingCopyRoot = filepath.FromSlash(info.WorkingCopyRoot)
+	return info, nil
 }
