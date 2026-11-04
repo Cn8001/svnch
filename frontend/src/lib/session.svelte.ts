@@ -125,6 +125,7 @@ export class Session {
   run = async <T>(label: string, make: () => Promise<T> & { cancel?: () => void }, url = ""): Promise<T | Failed> => {
     let logins = 0;
     let trusts = 0;
+    let cleanups = 0;
     for (;;) {
       let cancelled = false;
       const p = make();
@@ -145,6 +146,9 @@ export class Session {
         const where = url || this.info?.repositoryRoot || "";
         if (code === "AUTH" && logins < 3 && where && (await this.askLogin(where, logins++ ? "That did not work, try again." : ""))) continue;
         if (code === "CERT" && trusts++ < 2 && where && (await this.askTrust(where))) continue;
+        // A lock left by an interrupted command (a stopped update, a closed window) only needs svn cleanup, which
+        // finishes or rolls back what was cut off; do it once and try again rather than send the person to a terminal.
+        if (code === "NEEDS_CLEANUP" && cleanups++ < 1 && this.wc && (await this.cleanupFor(label))) continue;
         if (code === "CERT" && !this.cert.info) {
           this.show({
             kind: "text",
@@ -162,6 +166,18 @@ export class Session {
       }
     }
   };
+
+  private async cleanupFor(label: string): Promise<boolean> {
+    this.busy = "Cleaning up an interrupted operation";
+    try {
+      await svn.Cleanup(this.wc);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.busy = label;
+    }
+  }
 
   // remote is run for components that want the error text back rather than a sentinel.
   remote = async <T>(label: string, make: () => Promise<T>, url: string): Promise<Result<T>> => {

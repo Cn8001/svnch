@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ var (
 	ErrInvalidRequest = errors.New("invalid request")
 	ErrAuthFailed     = errors.New("authentication failed")
 	ErrCertUntrusted  = errors.New("server certificate not trusted")
+	ErrNeedsCleanup   = errors.New("working copy locked by an interrupted operation")
 )
 
 type Runner interface {
@@ -27,6 +30,7 @@ type Runner interface {
 
 type ExecRunner struct {
 	binary string
+	mucc   string // svnmucc, which ships next to svn; only it can set a property on a url with a message
 
 	mu       sync.Mutex
 	username string
@@ -34,7 +38,21 @@ type ExecRunner struct {
 }
 
 func NewExecRunner(binary string) *ExecRunner {
-	return &ExecRunner{binary: binary}
+	return &ExecRunner{binary: binary, mucc: sibling(binary, "svnmucc")}
+}
+
+// sibling is the tool name next to the svn binary when it is there, so svnch uses svn's own copy of it, and the bare
+// name for PATH otherwise.
+func sibling(binary, name string) string {
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if dir := filepath.Dir(binary); dir != "." && dir != "" {
+		if p := filepath.Join(dir, name); fileExists(p) {
+			return p
+		}
+	}
+	return name
 }
 
 // SetCredentials keeps a login for the rest of the session; svn also saves it when its password store allows, but
@@ -52,7 +70,18 @@ func (r *ExecRunner) Credentials() (username, password string) {
 }
 
 func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...string) ([]byte, error) {
-	full := []string{subcommand, "--non-interactive"}
+	return r.exec(ctx, r.binary, dir, subcommand, []string{subcommand}, args)
+}
+
+// Mucc runs svnmucc with its options and then its actions, svnmucc's own order.
+func (r *ExecRunner) Mucc(ctx context.Context, args ...string) ([]byte, error) {
+	return r.exec(ctx, r.mucc, "", "svnmucc", nil, args)
+}
+
+// exec puts lead, --non-interactive, the session login and args together; the login goes in the middle because svn
+// wants options after the subcommand and svnmucc before its actions, and both read --password-from-stdin.
+func (r *ExecRunner) exec(ctx context.Context, binary, dir, what string, lead, args []string) ([]byte, error) {
+	full := append(lead, "--non-interactive")
 	r.mu.Lock()
 	username, password := r.username, r.password
 	r.mu.Unlock()
@@ -62,15 +91,16 @@ func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...st
 	}
 	full = append(full, args...)
 
-	cmd := command(ctx, r.binary, full...)
+	cmd := command(ctx, binary, full...)
 	if username != "" {
 		// No newline: svn on Windows ends the line at \r\n only, so a trailing \n became part of the password. Without
 		// one, svn reads to the end of stdin on every system.
 		cmd.Stdin = strings.NewReader(password)
 	}
 	cmd.Dir = dir
-	// Keeps stderr in English so error codes and messages read the same on every machine.
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	// LC_ALL=C keeps stderr in English so codes and messages read the same everywhere; svn 1.14 only knows its
+	// shelving commands (x-shelve and the rest) when SVN_EXPERIMENTAL_COMMANDS names the shelf3 version.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "SVN_EXPERIMENTAL_COMMANDS=shelf3")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -78,14 +108,14 @@ func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...st
 
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return nil, fmt.Errorf("run %s: %w", r.binary, ErrSvnNotFound)
+			return nil, fmt.Errorf("run %s: %w", binary, ErrSvnNotFound)
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("svn %s: %w", subcommand, ctxErr)
+			return nil, fmt.Errorf("svn %s: %w", what, ctxErr)
 		}
 		msg := strings.TrimSpace(stderr.String())
 		return nil, &CommandError{
-			Subcommand: subcommand,
+			Subcommand: what,
 			Code:       errorCode(msg),
 			Causes:     errorCodes(msg),
 			Stderr:     msg,
@@ -135,6 +165,8 @@ func sentinel(code string) error {
 		return ErrAuthFailed
 	case "E230001":
 		return ErrCertUntrusted
+	case "E155004", "E155037":
+		return ErrNeedsCleanup
 	}
 	return nil
 }

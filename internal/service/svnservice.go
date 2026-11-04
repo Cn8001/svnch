@@ -267,21 +267,58 @@ func (s *SVNService) Properties(ctx context.Context, target string) ([]svn.Prope
 // SetProperty and DeleteProperty return the committed revision for a url target, and 0 for a working copy, where
 // the change waits for the next commit like any other.
 func (s *SVNService) SetProperty(ctx context.Context, req svn.PropRequest) (int64, error) {
+	if len(req.Targets) == 1 && svn.IsURL(req.Targets[0]) {
+		return s.serverProperty(ctx, req, true)
+	}
 	args, err := svn.PropSetArgs(req)
-	out, err := s.run(ctx, "", "propset", args, err)
-	if err != nil {
+	if _, err := s.run(ctx, "", "propset", args, err); err != nil {
 		return 0, fmt.Errorf("set %s: %w", req.Name, err)
 	}
-	return svn.ParseCommit(out)
+	return 0, nil
 }
 
 func (s *SVNService) DeleteProperty(ctx context.Context, req svn.PropRequest) (int64, error) {
+	if len(req.Targets) == 1 && svn.IsURL(req.Targets[0]) {
+		return s.serverProperty(ctx, req, false)
+	}
 	args, err := svn.PropDelArgs(req)
-	out, err := s.run(ctx, "", "propdel", args, err)
-	if err != nil {
+	if _, err := s.run(ctx, "", "propdel", args, err); err != nil {
 		return 0, fmt.Errorf("delete %s: %w", req.Name, err)
 	}
-	return svn.ParseCommit(out)
+	return 0, nil
+}
+
+// serverProperty goes through svnmucc with the value in a file, so a value of any shape is passed as it is.
+func (s *SVNService) serverProperty(ctx context.Context, req svn.PropRequest, set bool) (int64, error) {
+	mucc, ok := s.runner.(svn.Mucc)
+	if !ok {
+		return 0, fmt.Errorf("server property %s: svnmucc is not available: %w", req.Name, svn.ErrInvalidRequest)
+	}
+	valueFile := ""
+	if set {
+		f, err := os.CreateTemp("", "svnch-prop-*")
+		if err != nil {
+			return 0, fmt.Errorf("set %s: %w", req.Name, err)
+		}
+		defer os.Remove(f.Name())
+		_, werr := f.WriteString(req.Value)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return 0, fmt.Errorf("set %s: %w", req.Name, werr)
+		}
+		valueFile = f.Name()
+	}
+	args, err := svn.MuccPropArgs(req, valueFile)
+	if err != nil {
+		return 0, err
+	}
+	out, err := mucc.Mucc(ctx, args...)
+	if err != nil {
+		return 0, fmt.Errorf("%s on the server: %w", req.Name, err)
+	}
+	return svn.ParseMucc(out)
 }
 
 // Ignore adds each path's name to its folder's svn:ignore, the way TortoiseSVN's "Add to ignore list" does.

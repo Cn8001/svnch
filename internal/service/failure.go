@@ -32,6 +32,8 @@ func code(err error) string {
 		return "CERT"
 	case errors.Is(err, svn.ErrNotWorkingCopy):
 		return "NOT_WORKING_COPY"
+	case errors.Is(err, svn.ErrNeedsCleanup):
+		return "NEEDS_CLEANUP"
 	case errors.Is(err, svn.ErrInvalidRequest), errors.Is(err, servers.ErrInvalid):
 		return "INVALID_REQUEST"
 	case errors.Is(err, ErrUpdatesOff):

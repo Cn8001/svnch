@@ -87,3 +87,30 @@ func TestAddIgnore_AppendsOnce(t *testing.T) {
 		t.Errorf("once %q, twice %q, fresh %q", once, twice, fresh)
 	}
 }
+
+func TestMuccPropArgs_SetAndDelete(t *testing.T) {
+	// Arrange
+	req := PropRequest{Targets: []string{"https://h/r/docs"}, Name: "x:owner", Message: "Owner"}
+
+	// Act
+	set, setErr := MuccPropArgs(req, "/tmp/value")
+	del, delErr := MuccPropArgs(req, "")
+
+	// Assert
+	if setErr != nil || !slices.Equal(set, []string{"-m", "Owner", "propsetf", "x:owner", "/tmp/value", "https://h/r/docs"}) {
+		t.Errorf("set = %q (%v)", set, setErr)
+	}
+	if delErr != nil || !slices.Equal(del, []string{"-m", "Owner", "propdel", "x:owner", "https://h/r/docs"}) {
+		t.Errorf("del = %q (%v)", del, delErr)
+	}
+}
+
+func TestParseMucc_ReadsRevision(t *testing.T) {
+	// Act
+	rev, err := ParseMucc([]byte("r12 committed by me at 2026-11-04T12:46:58.669628Z\n"))
+
+	// Assert
+	if err != nil || rev != 12 {
+		t.Errorf("got (%d, %v)", rev, err)
+	}
+}

@@ -242,7 +242,7 @@ func TestParseLog_EmptyIsNotNil(t *testing.T) {
 
 func TestParseShelfList_KeepsNames(t *testing.T) {
 	// Arrange
-	out := []byte("wip         version 1, 3 minutes ago, 2 paths changed\n\nspike       version 2, 1 day ago, 5 paths changed\n")
+	out := []byte("wip         version 1, 3 minutes ago, 2 paths changed\n half done\n\nspike       version 2, 1 day ago, 5 paths changed\n")
 
 	// Act
 	names := ParseShelfList(out)

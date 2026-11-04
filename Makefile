@@ -24,7 +24,7 @@ endif
 
 .DEFAULT_GOAL := start
 .PHONY: start help doctor dev build build-linux build-windows build-darwin build-all \
-        release publish publish-check test bindings licenses icons menuicons version clean
+        release publish publish-check test bindings licenses icons menuicons integration version clean
 
 ## start: (plain make) check this machine and build for it
 start: build
@@ -147,6 +147,10 @@ licenses:
 ## icons: regenerate the platform icons from build/appicon.png
 icons:
 	wails3 task common:generate:icons
+
+## integration: run every svn command svnch uses against a real svn and a throwaway repository (needs svn, svnadmin)
+integration:
+	go test -race -tags integration -run Integration ./internal/service/
 
 ## menuicons: redraw the Explorer menu icons into internal/explorer/icons
 menuicons:

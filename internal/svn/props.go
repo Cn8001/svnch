@@ -1,9 +1,11 @@
 package svn
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -115,3 +117,44 @@ func AddIgnore(current, name string) string {
 	}
 	return strings.TrimRight(current, "\r\n") + "\n" + name + "\n"
 }
+
+// Mucc is svnmucc, which changes the repository directly in one commit; svn propset does not take a url with a
+// message, so a property on the server is set through it.
+type Mucc interface {
+	Mucc(ctx context.Context, args ...string) ([]byte, error)
+}
+
+// MuccPropArgs sets (with valueFile, read by propsetf so any value is safe) or deletes (valueFile empty) one property
+// on a url, as one commit with message.
+func MuccPropArgs(req PropRequest, valueFile string) ([]string, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" || strings.HasPrefix(name, "-") || len(req.Targets) != 1 {
+		return nil, fmt.Errorf("server property %q: %w", req.Name, ErrInvalidRequest)
+	}
+	if err := requireURLs(req.Targets[0]); err != nil {
+		return nil, err
+	}
+	if err := requireMessage(req.Message); err != nil {
+		return nil, err
+	}
+	args := []string{"-m", req.Message}
+	if valueFile != "" {
+		return append(args, "propsetf", name, valueFile, req.Targets[0]), nil
+	}
+	return append(args, "propdel", name, req.Targets[0]), nil
+}
+
+// ParseMucc reads the revision from svnmucc's "r12 committed by ..." line.
+func ParseMucc(out []byte) (int64, error) {
+	for line := range strings.Lines(string(out)) {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "r"); ok {
+			if n, _, ok := strings.Cut(rest, " committed"); ok {
+				return strconv.ParseInt(n, 10, 64)
+			}
+		}
+	}
+	return 0, fmt.Errorf("parse svnmucc: no revision in %q", strings.TrimSpace(string(out)))
+}
+
+// IsURL tells a url target from a working copy path.
+func IsURL(target string) bool { return requireURLs(target) == nil }

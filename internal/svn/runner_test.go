@@ -173,3 +173,18 @@ func TestExecRunner_PasswordGoesToStdinWithoutNewline(t *testing.T) {
 		t.Errorf("svn read %q from stdin, want %q", got, "secret")
 	}
 }
+
+func TestCommandError_LockedWorkingCopyNeedsCleanup(t *testing.T) {
+	// Arrange
+	stderr := "svn: E155004: Run 'svn cleanup' to remove locks (type 'svn help cleanup' for details)\n" +
+		"svn: E155004: Working copy 'C:\\wc\\Assets' locked.\n"
+	err := error(&CommandError{Subcommand: "update", Code: errorCode(stderr), Causes: errorCodes(stderr), Stderr: stderr})
+
+	// Act
+	needs := errors.Is(err, ErrNeedsCleanup)
+
+	// Assert
+	if !needs {
+		t.Errorf("errors.Is(ErrNeedsCleanup) = false for %q", stderr)
+	}
+}

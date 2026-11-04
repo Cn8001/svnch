@@ -30,10 +30,14 @@ func UnshelveArgs(name string) ([]string, error) {
 	return []string{"--", name}, nil
 }
 
-// ParseShelfList keeps only the names; the rest of each line is a human summary whose wording changes between versions.
+// ParseShelfList keeps only the names; the rest of each line is a human summary whose wording changes between versions,
+// and a shelf's message follows on indented lines of its own.
 func ParseShelfList(out []byte) []string {
 	names := []string{}
 	for line := range strings.Lines(string(out)) {
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
 		if fields := strings.Fields(line); len(fields) > 0 {
 			names = append(names, fields[0])
 		}

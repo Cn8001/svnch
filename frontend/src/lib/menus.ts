@@ -89,6 +89,7 @@ export function wcItems(s: Session, a: Actions): MenuItem[] {
     { label: "Show log", action: () => a.openLog(s.wc), disabled: !!s.busy },
     { label: "Update", action: () => a.update(), disabled: !!s.busy },
     { label: "Log in...", action: () => s.startLogin(s.info?.repositoryRoot) },
+    { label: "Relocate...", action: () => s.show({ kind: "relocate" }), disabled: !!s.busy },
   ];
 }
 
