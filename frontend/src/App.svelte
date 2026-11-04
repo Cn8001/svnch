@@ -5,6 +5,8 @@
   import MenuBar from "./lib/MenuBar.svelte";
   import FileList from "./lib/FileList.svelte";
   import DiffView from "./lib/DiffView.svelte";
+  import HistoryView from "./lib/HistoryView.svelte";
+  import ConflictPanel from "./lib/ConflictPanel.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
   import Modal from "./lib/Modal.svelte";
   import SvnMissing from "./lib/SvnMissing.svelte";
@@ -124,7 +126,7 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist" | "conflicts";
 
   let setup = $state<Setup | null>(null);
   let checkingSvn = $state(false);
@@ -331,6 +333,7 @@
     try {
       info = await svn.Info(wc);
     } catch {}
+    if (pane === "history") loadHistory();
   }
 
   async function refresh() {
@@ -372,6 +375,40 @@
     } finally {
       if (seq === diffSeq) diffLoading = false;
     }
+  }
+
+  let pane = $state<"diff" | "history">("diff");
+  let history = $state({ entries: [] as LogEntry[], loading: false, wc: "" });
+
+  // History is read when its tab opens and again after anything that moves the working copy, so "you are here"
+  // and the list stay true without reading the log on every refresh.
+  async function loadHistory() {
+    if (!wc) return;
+    history.loading = true;
+    // The url, not the folder: svn log on a working copy stops at its own revision and would hide what is newer.
+    const target = info?.url ?? wc;
+    const r = await run("Reading history", () => svn.Log({ target, limit: 200, verbose: true }), info?.repositoryRoot);
+    history.loading = false;
+    if (r === failed) return;
+    history.entries = r ?? [];
+    history.wc = wc;
+  }
+
+  function showPane(p: "diff" | "history") {
+    pane = p;
+    if (p === "history" && (history.wc !== wc || !history.entries.length)) loadHistory();
+  }
+
+  function historyItems(e: LogEntry): MenuItem[] {
+    const here = info?.revision === e.revision;
+    return [
+      { label: here ? "You are at this revision" : `Go to r${e.revision}`, action: () => updateToRevision(e, wc), disabled: here || !!busy },
+      { label: "Show changes", action: () => { pane = "diff"; showRevisionDiff(info?.url ?? wc, e.revision); } },
+      { label: "Undo this commit...", action: () => undoRevision(e, wc), disabled: !!busy },
+      { separator: true },
+      { label: "Copy revision number", action: () => Clipboard.SetText(String(e.revision)) },
+      { label: "Copy message", action: () => Clipboard.SetText(e.message) },
+    ];
   }
 
   async function showRevisionDiff(target: string, rev: number) {
@@ -434,8 +471,7 @@
     return /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith("^/");
   }
 
-  function undoRevision(e: LogEntry) {
-    const target = log.target;
+  function undoRevision(e: LogEntry, target = log.target) {
     const what = target === wc ? "your working copy" : relative(wc, target);
     ask(
       `Undo r${e.revision}`,
@@ -451,8 +487,7 @@
     );
   }
 
-  function updateToRevision(e: LogEntry) {
-    const target = log.target;
+  function updateToRevision(e: LogEntry, target = log.target) {
     const what = target === wc ? "Your working copy" : relative(wc, target);
     ask(
       `Update to r${e.revision}`,
@@ -641,6 +676,9 @@
       { label: "Show diff", action: () => showDiff(path), disabled: many || !versioned },
       { separator: true },
       { label: "Add" + (unversioned.length > 1 ? ` (${unversioned.length})` : ""), action: () => add(unversioned), disabled: !unversioned.length },
+      ...(e && (e.item === "conflicted" || e.treeConflicted || e.props === "conflicted")
+        ? [{ label: "Resolve conflict...", action: () => openConflicts(path) }]
+        : []),
       { label: "Discard changes..." + n, action: () => discard(paths), disabled: !under(paths).length },
       { label: "Delete..." + n, action: () => remove(paths, false), disabled: unversioned.length > 0 },
       { label: "Remove from svn, keep file..." + n, action: () => remove(paths, true), disabled: unversioned.length > 0 },
@@ -657,8 +695,50 @@
   let commitLabel = $derived(checked.size ? `Commit ${checked.size} selected` : "Commit all changes");
   let canCommit = $derived(!!wc && !busy && !!message.trim() && entries.some((e) => hasChanges(e) || checked.has(e.path)));
 
+  let conflicts = $derived(entries.filter((e) => e.item === "conflicted" || e.treeConflicted || e.props === "conflicted"));
+  let conflictFirst = $state("");
+
+  function openConflicts(path = "") {
+    conflictFirst = path;
+    modal = "conflicts";
+  }
+
+  async function resolveConflicts(accept: string, paths: string[]): Promise<boolean> {
+    const r = await run("Resolving", () => svn.Resolve(accept, paths));
+    await refresh();
+    if (r === failed) return false;
+    if (!conflicts.length) {
+      modal = null;
+      notice = "All conflicts are resolved. You can commit now.";
+    }
+    return true;
+  }
+
+  async function openLocal(path: string) {
+    try {
+      await ExplorerService.OpenFile(path);
+    } catch (e) {
+      error = errorText(e);
+    }
+  }
+
+  // commit always updates first: svn refuses files that are behind, and committing on an old base is how someone
+  // else's work gets missed. It stops when the update brings conflicts, which have to be settled before committing.
   async function commit() {
     if (!canCommit) return;
+    const up = await run("Updating before commit", () => svn.Update([wc]));
+    if (up === failed) return;
+    await refresh();
+    await reloadInfo();
+    if (conflicts.length) {
+      notice = `Updated to r${up}, and ${conflicts.length} ${conflicts.length === 1 ? "file conflicts" : "files conflict"}. Resolve them, then commit.`;
+      openConflicts();
+      return;
+    }
+    if (!canCommit) {
+      notice = `Updated to r${up}. Nothing is left to commit.`;
+      return;
+    }
     const sel = [...checked];
     const toAdd = sel.filter((p) => {
       const e = entry(p);
@@ -680,7 +760,7 @@
     if (rev === failed) return;
     await refresh();
     await reloadInfo();
-    notice = `At revision ${rev}.`;
+    notice = conflicts.length ? `At revision ${rev}, with ${conflicts.length} conflicting ${conflicts.length === 1 ? "file" : "files"}.` : `At revision ${rev}.`;
   }
 
   function openCheckout(url = "", path = "") {
@@ -976,6 +1056,7 @@
         { label: "Refresh", action: refresh, hint: "F5", disabled: !wc || !!busy },
         { label: "Update", action: update, hint: "Ctrl+U", disabled: !wc || !!busy },
         { label: "Commit", action: commit, hint: "Ctrl+Enter", disabled: !canCommit },
+        { label: "Resolve conflicts...", action: () => openConflicts(), disabled: !conflicts.length },
         { label: "Discard all changes...", action: () => discard([wc]), disabled: !wc || !!busy || !entries.some((e) => e.item !== "ignored") },
         { separator: true as const },
         { label: "Details...", action: openDetails, disabled: !wc },
@@ -1094,6 +1175,12 @@
   {:else}
     <main>
       <section class="left">
+        {#if conflicts.length}
+          <div class="banner">
+            <span><b>{conflicts.length}</b> {conflicts.length === 1 ? "file conflicts" : "files conflict"}. Commit waits until they are resolved.</span>
+            <button class="small" onclick={() => openConflicts()}>Resolve...</button>
+          </div>
+        {/if}
         <div class="files">
           <FileList
             {wc}
@@ -1112,11 +1199,28 @@
         </div>
         <form class="commit" onsubmit={(e) => { e.preventDefault(); commit(); }}>
           <textarea bind:value={message} bind:this={commitBox} placeholder="Commit message" rows="4"></textarea>
-          <button class="primary" type="submit" disabled={!canCommit}>{commitLabel}</button>
+          <button class="primary" type="submit" disabled={!canCommit} title="Updates first, then commits">{commitLabel}</button>
         </form>
       </section>
       <section class="right">
-        <DiffView title={diffTitle} text={diffText} loading={diffLoading} />
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected={pane === "diff"} class:on={pane === "diff"} onclick={() => showPane("diff")}>Diff</button>
+          <button role="tab" aria-selected={pane === "history"} class:on={pane === "history"} onclick={() => showPane("history")}>History</button>
+        </div>
+        <div class="pane">
+          {#if pane === "diff"}
+            <DiffView title={diffTitle} text={diffText} loading={diffLoading} />
+          {:else}
+            <HistoryView
+              entries={history.entries}
+              current={info?.revision ?? 0}
+              loading={history.loading}
+              onmenu={(e, ev) => (ctxMenu = { x: ev.clientX, y: ev.clientY, items: historyItems(e) })}
+              onopen={(e) => { pane = "diff"; showRevisionDiff(info?.url ?? wc, e.revision); }}
+              onreload={loadHistory}
+            />
+          {/if}
+        </div>
       </section>
     </main>
   {/if}
@@ -1432,6 +1536,14 @@
       <button class="primary" type="submit" disabled={!cl.name.trim() || cl.name.trim().startsWith("-")}>Move</button>
     </form>
   </Modal>
+{:else if modal === "conflicts"}
+  <Modal title="Resolve conflicts" wide onclose={() => (modal = null)}>
+    {#if conflicts.length}
+      <ConflictPanel {wc} {conflicts} first={conflictFirst} resolve={resolveConflicts} openFile={openLocal} />
+    {:else}
+      <p>No conflicts left.</p>
+    {/if}
+  </Modal>
 {:else if modal === "details" && info}
   <Modal title="Working copy" onclose={() => (modal = null)}>
     <dl class="kv">
@@ -1562,9 +1674,16 @@
   main { display: grid; grid-template-columns: minmax(300px, 36%) 1fr; min-height: 0; }
   .left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
   .files { flex: 1; min-height: 0; }
+  .banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--del-bg); color: var(--del-ink); border-bottom: 1px solid var(--line); font-size: 12px; }
+  .banner button { color: var(--text); }
   .commit { display: grid; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
   .commit button { padding: 6px 12px; }
-  .right { min-width: 0; min-height: 0; background: var(--bg); }
+  .right { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; background: var(--bg); }
+  .pane { display: grid; min-height: 0; overflow: hidden; }
+  .tabs { display: flex; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); padding: 5px 12px; font-weight: 600; }
+  .tabs button:hover:not(:disabled) { background: transparent; color: var(--text); }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 
   /* Above the modal backdrop, so Stop is reachable while a window is open. */
   .status {

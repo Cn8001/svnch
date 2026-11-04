@@ -31,3 +31,7 @@ func (s *ExplorerService) SetEnabled(ctx context.Context, on bool) error {
 	}
 	return nil
 }
+
+func (s *ExplorerService) OpenFile(ctx context.Context, path string) error {
+	return explorer.Open(ctx, path)
+}

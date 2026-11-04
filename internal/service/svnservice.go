@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -251,6 +252,40 @@ func (s *SVNService) Discard(ctx context.Context, wc string, paths []string) (sv
 		}
 	}
 	return svn.DiscardResult{Reverted: len(plan.Revert), Removed: len(plan.Remove)}, nil
+}
+
+func (s *SVNService) Resolve(ctx context.Context, accept string, paths []string) error {
+	args, err := svn.ResolveArgs(accept, paths...)
+	if _, err := s.run(ctx, "", "resolve", args, err); err != nil {
+		return fmt.Errorf("resolve with %s: %w", accept, err)
+	}
+	return nil
+}
+
+// localLimit keeps the conflict view to files a person reads; anything bigger is opened in its own program.
+const localLimit = 2 << 20
+
+// ReadLocal reads a file of the working copy for the conflict view, and only one inside wc.
+func (s *SVNService) ReadLocal(ctx context.Context, wc, path string) (svn.FileContent, error) {
+	if !svn.Inside(wc, path) {
+		return svn.FileContent{}, fmt.Errorf("%s is not in the working copy: %w", path, svn.ErrInvalidRequest)
+	}
+	if err := ctx.Err(); err != nil {
+		return svn.FileContent{}, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return svn.FileContent{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, localLimit+1))
+	if err != nil {
+		return svn.FileContent{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(data) > localLimit {
+		return svn.FileContent{Binary: true, Size: len(data)}, nil
+	}
+	return svn.ParseCat(data), nil
 }
 
 func (s *SVNService) Move(ctx context.Context, from, to string) error {

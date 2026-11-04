@@ -418,3 +418,42 @@ func TestDiscard_RevertsAndDeletesOnlyWhatSvnCallsNew(t *testing.T) {
 		t.Errorf("ran %q", runner.ran)
 	}
 }
+
+func TestReadLocal_RefusesFilesOutsideTheWorkingCopy(t *testing.T) {
+	// Arrange
+	wc := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	_, err := s.ReadLocal(context.Background(), wc, outside)
+
+	// Assert
+	if !errors.Is(err, svn.ErrInvalidRequest) {
+		t.Errorf("err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestReadLocal_ReadsConflictMarkers(t *testing.T) {
+	// Arrange
+	wc := t.TempDir()
+	file := filepath.Join(wc, "a.txt")
+	text := "<<<<<<< .mine\nmine\n=======\ntheirs\n>>>>>>> .r5\n"
+	if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	got, err := s.ReadLocal(context.Background(), wc, file)
+
+	// Assert
+	if err != nil || got.Text != text || got.Binary {
+		t.Errorf("got (%+v, %v)", got, err)
+	}
+}
