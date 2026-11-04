@@ -11,6 +11,7 @@
     ontoggle,
     onlythese,
     oncontext,
+    onlistcontext,
   }: {
     wc: string;
     entries: StatusEntry[];
@@ -20,11 +21,12 @@
     ontoggle: (path: string) => void;
     onlythese: (paths: string[]) => void; // Ctrl+click on a box: select just this file, folder or group
     oncontext: (path: string, e: MouseEvent) => void; // a folder row with no change of its own passes its folder path
+    onlistcontext: (name: string, paths: string[], e: MouseEvent) => void; // right-click on a changelist's own row
   } = $props();
 
   type Node = { name: string; key: string; abs: string; entry?: StatusEntry; children: Map<string, Node> };
   type Row =
-    | { kind: "group"; key: string; label: string; under: StatusEntry[]; checkable: boolean }
+    | { kind: "group"; key: string; label: string; under: StatusEntry[]; checkable: boolean; changelist: string }
     | { kind: "folder"; key: string; node: Node; depth: number; under: StatusEntry[] }
     | { kind: "file"; key: string; node: Node; depth: number; dir: string };
 
@@ -55,10 +57,18 @@
 
   let sep = $derived(wc.includes("\\") && !wc.includes("/") ? "\\" : "/");
 
+  // Changelists come first, each its own group, as in Rider; "Changes" is what is in none of them.
   let groups = $derived([
-    { key: "changes", label: "Changes", list: entries.filter((e) => e.item !== "unversioned" && e.item !== "ignored"), checkable: true },
-    { key: "unversioned", label: "Unversioned Files", list: entries.filter((e) => e.item === "unversioned"), checkable: true },
-    { key: "ignored", label: "Ignored Files", list: entries.filter((e) => e.item === "ignored"), checkable: false },
+    ...[...new Set(entries.map((e) => e.changelist).filter(Boolean))].sort().map((name) => ({
+      key: `cl:${name}`,
+      label: name,
+      list: entries.filter((e) => e.changelist === name),
+      checkable: true,
+      changelist: name,
+    })),
+    { key: "changes", label: "Changes", list: entries.filter((e) => !e.changelist && e.item !== "unversioned" && e.item !== "ignored"), checkable: true, changelist: "" },
+    { key: "unversioned", label: "Unversioned Files", list: entries.filter((e) => e.item === "unversioned"), checkable: true, changelist: "" },
+    { key: "ignored", label: "Ignored Files", list: entries.filter((e) => e.item === "ignored"), checkable: false, changelist: "" },
   ]);
 
   function build(prefix: string, list: StatusEntry[]): Node {
@@ -132,7 +142,7 @@
     for (const g of groups) {
       if (!g.list.length) continue;
       const key = `g:${g.key}`;
-      out.push({ kind: "group", key, label: g.label, under: g.list, checkable: g.checkable });
+      out.push({ kind: "group", key, label: g.label, under: g.list, checkable: g.checkable, changelist: g.changelist });
       if (collapsed.has(key)) continue;
       if (tree) walk(build(key, g.list), 1, out);
       else flat(key, g.list, out);
@@ -211,7 +221,10 @@
 
   function context(r: Row, ev: MouseEvent) {
     ev.preventDefault();
-    if (r.kind === "group") return;
+    if (r.kind === "group") {
+      if (r.changelist) onlistcontext(r.changelist, r.under.map((e) => e.path), ev);
+      return;
+    }
     const path = r.node.entry?.path ?? r.node.abs;
     if (r.node.entry) onfocus(path);
     oncontext(path, ev);
@@ -236,6 +249,8 @@
       {#if r.kind === "group"}
         <div
           class="row group"
+          class:cl={!!r.changelist}
+          title={r.changelist ? "Changelist; right-click for its actions" : undefined}
           role="treeitem"
           aria-selected="false"
           aria-expanded={!collapsed.has(r.key)}
@@ -255,6 +270,7 @@
               onchange={(ev) => boxChange(ev, () => setAll(r.under), r.under.map((x) => x.path))}
             />
           {/if}
+          {#if r.changelist}<svg class="icon cltag" viewBox="0 0 16 16" width="13" height="13"><path d="M2 2.5h6l6 6-5.5 5.5-6-6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /><circle cx="5.2" cy="5.7" r="1.1" fill="currentColor" /></svg>{/if}
           <span class="name">{r.label}</span>
           <span class="count">{files(r.under.length)}</span>
         </div>
@@ -343,6 +359,7 @@
   .row.focused { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
   .row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .group { font-weight: 600; margin-top: 2px; }
+  .group.cl .cltag { color: var(--accent); }
   .indent { width: calc((var(--depth) - 1) * 16px + 4px); flex: none; }
   .chev { width: 12px; flex: none; color: var(--muted); transition: transform 0.12s; }
   .chev.closed { transform: rotate(-90deg); }

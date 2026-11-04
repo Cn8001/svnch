@@ -8,7 +8,7 @@ import (
 type MergeRequest struct {
 	Source string `json:"source"` // URL or ^/branches/x
 	Target string `json:"target"` // working copy path
-	Change int64  `json:"change"` // cherry-pick one revision, 0 for a full sync merge
+	Change int64  `json:"change"` // cherry-pick one revision, negative to undo it, 0 for a full sync merge
 	DryRun bool   `json:"dryRun"`
 }
 
@@ -17,11 +17,8 @@ func MergeArgs(req MergeRequest) ([]string, error) {
 	if req.Source == "" || req.Target == "" {
 		return nil, fmt.Errorf("merge needs a source and a target: %w", ErrInvalidRequest)
 	}
-	if req.Change < 0 {
-		return nil, fmt.Errorf("merge change %d: %w", req.Change, ErrInvalidRequest)
-	}
 	args := []string{"--accept", "postpone"}
-	if req.Change > 0 {
+	if req.Change != 0 {
 		args = append(args, "-c", strconv.FormatInt(req.Change, 10))
 	}
 	if req.DryRun {

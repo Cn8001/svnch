@@ -86,7 +86,7 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist";
 
   let setup = $state<Setup | null>(null);
   let checkingSvn = $state(false);
@@ -109,7 +109,11 @@
   let mg = $state({ source: "", change: "", dryRun: true, output: "" });
   let sh = $state({ name: "", message: "" });
   let shelves: string[] = $state([]);
-  let log = $state({ target: "", entries: [] as LogEntry[], selected: 0 });
+  let log = $state({ target: "", entries: [] as LogEntry[], selected: 0, purpose: "" });
+  let br = $state({ name: "", message: "", switchAfter: true });
+  let sw = $state({ url: "", choices: [] as { label: string; url: string }[], loading: false });
+  let cl = $state({ paths: [] as string[], name: "" });
+  let commitBox: HTMLTextAreaElement | undefined = $state();
   let help = $state({ topic: "", text: "" });
   let textBox = $state({ title: "", text: "" });
 
@@ -354,6 +358,161 @@
     modal = "confirm";
   }
 
+  // layout splits the working copy's url into the usual trunk / branches / tags parts. A repository that holds
+  // several projects keeps them per project (^/Game/trunk), so the folder above trunk is found, not assumed to be ^/.
+  function layout() {
+    if (!info) return null;
+    const root = info.repositoryRoot.replace(/\/+$/, "");
+    const rel = (info.relativeUrl || "^/").replace(/^\^/, "");
+    const m = rel.match(/^(.*?)\/(trunk|branches\/[^/]+|tags\/[^/]+)(\/.*)?$/);
+    if (!m) return { base: root, line: "", sub: "", from: info.url };
+    const base = root + m[1];
+    return { base, line: decodeURIComponent(m[2]), sub: m[3] ?? "", from: `${base}/${m[2]}` };
+  }
+
+  function urlOf(path: string): string {
+    if (!info) return path;
+    if (path === wc) return info.url;
+    return info.url + "/" + relative(wc, path).split(/[\\/]/).map(encodeURIComponent).join("/");
+  }
+
+  function firstLine(e: LogEntry): string {
+    return e.message.split("\n")[0] || "(no message)";
+  }
+
+  function isURL(target: string): boolean {
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith("^/");
+  }
+
+  function undoRevision(e: LogEntry) {
+    const target = log.target;
+    const what = target === wc ? "your working copy" : relative(wc, target);
+    ask(
+      `Undo r${e.revision}`,
+      `svnch applies the opposite of r${e.revision} to ${what}:\n\n  ${firstLine(e)}\n\nNothing changes on the server until you commit it. If later commits touched the same lines, those files show as conflicted.`,
+      "Undo",
+      async () => {
+        const r = await run(`Undoing r${e.revision}`, () => svn.Merge({ source: urlOf(target), target, change: -e.revision, dryRun: false }));
+        if (r === failed) return;
+        if (!message.trim()) message = `Undo r${e.revision}: ${firstLine(e)}`;
+        await refresh();
+        notice = `r${e.revision} is undone in your working copy. Commit to share it.`;
+      },
+    );
+  }
+
+  function updateToRevision(e: LogEntry) {
+    const target = log.target;
+    const what = target === wc ? "Your working copy" : relative(wc, target);
+    ask(
+      `Update to r${e.revision}`,
+      `${what} will show its files as they were at r${e.revision}. Your local changes stay.\n\nNothing on the server changes, and Update brings it back to the latest. You cannot commit files that are behind, so update before committing.`,
+      "Update",
+      async () => {
+        const r = await run(`Updating to r${e.revision}`, () => svn.UpdateTo(target, e.revision));
+        if (r === failed) return;
+        await refresh();
+        await reloadInfo();
+        notice = `At revision ${r}.`;
+      },
+    );
+  }
+
+  function openBranch() {
+    if (!info) return;
+    br = { name: "", message: "", switchAfter: true };
+    modal = "branch";
+  }
+
+  function branchURL(name: string): string {
+    const l = layout();
+    return l ? `${l.base}/branches/${encodeURIComponent(name.trim())}` : "";
+  }
+
+  async function submitBranch() {
+    const l = layout();
+    const name = br.name.trim();
+    if (!l || !name) return;
+    const to = branchURL(name);
+    const message = br.message.trim() || `Create branch ${name}`;
+    const switchAfter = br.switchAfter;
+    modal = null;
+    const rev = await run(`Creating branch ${name}`, () => svn.Branch({ from: l.from, to, message }), l.base);
+    if (rev === failed) return;
+    if (switchAfter && (await run(`Switching to ${name}`, () => svn.Switch(wc, to + l.sub), l.base)) === failed) return;
+    if (switchAfter) {
+      await reloadInfo();
+      await refresh();
+    }
+    notice = `Branch ${name} created in r${rev}${switchAfter ? ", and this working copy is on it now" : ""}.`;
+  }
+
+  async function openSwitch() {
+    const l = layout();
+    if (!l) return;
+    sw = { url: info?.url ?? "", choices: [{ label: "trunk", url: `${l.base}/trunk` }], loading: true };
+    modal = "switch";
+    const r = await run("Reading branches", () => svn.List(`${l.base}/branches`), l.base);
+    sw.loading = false;
+    if (r === failed) {
+      error = "";
+      return;
+    }
+    for (const e of r ?? []) if (e.kind === "dir") sw.choices.push({ label: `branches/${e.name}`, url: `${l.base}/branches/${encodeURIComponent(e.name)}` });
+  }
+
+  async function submitSwitch(url: string) {
+    const l = layout();
+    if (!l || !url.trim()) return;
+    const known = sw.choices.some((c) => c.url === url);
+    const target = known ? url + l.sub : url.trim();
+    modal = null;
+    const rev = await run("Switching", () => svn.Switch(wc, target), l.base);
+    if (rev === failed) return;
+    await reloadInfo();
+    await refresh();
+    notice = `Switched to ${info?.relativeUrl || target}, at revision ${rev}.`;
+  }
+
+  let changelists = $derived([...new Set(entries.map((e) => e.changelist).filter(Boolean))].sort());
+
+  function openChangelist(paths: string[]) {
+    cl = { paths, name: "" };
+    modal = "changelist";
+  }
+
+  async function moveToChangelist(name: string) {
+    const target = name.trim();
+    if (!target) return;
+    const paths = cl.paths;
+    modal = null;
+    if ((await run(`Moving to ${target}`, () => svn.SetChangelist(target, paths))) === failed) return;
+    await refresh();
+  }
+
+  async function leaveChangelist(paths: string[]) {
+    if ((await run("Removing from changelist", () => svn.RemoveChangelist(paths))) === failed) return;
+    await refresh();
+  }
+
+  function changelistItems(name: string, paths: string[]): MenuItem[] {
+    return [
+      {
+        label: "Commit this changelist...",
+        action: () => {
+          checked.clear();
+          paths.forEach((p) => checked.add(p));
+          if (!message.trim()) message = `${name}: `;
+          commitBox?.focus();
+        },
+      },
+      { label: "Select only these", action: () => { checked.clear(); paths.forEach((p) => checked.add(p)); } },
+      { separator: true },
+      { label: "Rename...", action: () => openChangelist(paths) },
+      { label: "Dissolve changelist", action: () => leaveChangelist(paths) },
+    ];
+  }
+
   function names(paths: string[]): string {
     const shown = paths.slice(0, 8).map((p) => "  " + relative(wc, p));
     if (paths.length > 8) shown.push(`  ...and ${paths.length - 8} more`);
@@ -411,6 +570,9 @@
       { label: "Delete..." + n, action: () => remove(paths, false), disabled: unversioned.length > 0 },
       { label: "Remove from svn, keep file..." + n, action: () => remove(paths, true), disabled: unversioned.length > 0 },
       { label: "Rename / move...", action: () => openMove(path), disabled: many || !versioned },
+      { separator: true },
+      { label: "Move to changelist..." + n, action: () => openChangelist(sel.filter(isVersioned).map((x) => x.path)), disabled: !sel.some(isVersioned) },
+      { label: "Remove from changelist", action: () => leaveChangelist(sel.filter((x) => x.changelist).map((x) => x.path)), disabled: !sel.some((x) => x.changelist) },
       { separator: true },
       { label: "Show log", action: () => openLog(path), disabled: many || !versioned || e?.item === "added" || e?.item === "ignored" },
       { label: "Copy path", action: () => Clipboard.SetText(path) },
@@ -487,6 +649,8 @@
       { label: "Copy working copy path", action: () => Clipboard.SetText(wc) },
       { separator: true },
       { label: "Browse on server...", action: () => info && openRepos(info.url), disabled: !!busy },
+      { label: "Switch branch...", action: openSwitch, disabled: !!busy },
+      { label: "New branch...", action: openBranch, disabled: !!busy },
       { label: "Show log", action: () => openLog(wc), disabled: !!busy },
       { label: "Update", action: update, disabled: !!busy },
       { label: "Log in...", action: () => startLogin(info?.repositoryRoot) },
@@ -561,8 +725,8 @@
     notice = `Checked out revision ${r}.`;
   }
 
-  async function openLog(target: string) {
-    log = { target, entries: [], selected: 0 };
+  async function openLog(target: string, purpose = "") {
+    log = { target, entries: [], selected: 0, purpose };
     const r = await run("Reading log", () => svn.Log({ target, limit: 200, verbose: true }), target);
     if (r === failed) return;
     log.entries = r ?? [];
@@ -695,7 +859,11 @@
         { separator: true as const },
         { label: "Details...", action: openDetails, disabled: !wc },
         { label: "Show log", action: () => openLog(wc), disabled: !wc || !!busy },
+        { label: "Undo a commit...", action: () => openLog(wc, "Pick the commit to undo, then press Undo this revision."), disabled: !wc || !!busy },
         { label: "Merge...", action: openMerge, disabled: !wc || !!busy },
+        { separator: true as const },
+        { label: "New branch...", action: openBranch, disabled: !wc || !!busy },
+        { label: "Switch branch...", action: openSwitch, disabled: !wc || !!busy },
         { separator: true as const },
         { label: "Shelve changes...", action: openShelve, disabled: !wc || !!busy },
         { label: "Unshelve...", action: openUnshelve, disabled: !wc || !!busy },
@@ -706,6 +874,7 @@
       items: [
         { label: "svn command reference", action: () => openHelp() },
         { label: "Installing svn", action: () => { checkSvn(); modal = "svn"; } },
+        { label: "Report a problem...", action: () => Browser.OpenURL(`${REPO_URL}/issues`) },
         { label: "svnch on GitHub", action: () => Browser.OpenURL(REPO_URL) },
       ],
     },
@@ -766,7 +935,7 @@
     {#if info}
       <div class="where" role="button" tabindex="-1" title="Right-click for details" oncontextmenu={(e) => { e.preventDefault(); ctxMenu = { x: e.clientX, y: e.clientY, items: wcItems() }; }} ondblclick={openDetails}>
         <span class="path" title={wc}>{wc}</span>
-        <span class="muted" title={info.url}>{info.relativeUrl || info.url}</span>
+        <button class="branch" title="{info.url}, click to switch branch" onclick={openSwitch} disabled={!!busy}>{info.relativeUrl || info.url}</button>
         <span class="rev">r{info.revision}</span>
       </div>
     {/if}
@@ -803,10 +972,11 @@
               ps.forEach((p) => checked.add(p));
             }}
             oncontext={(p, e) => (ctxMenu = { x: e.clientX, y: e.clientY, items: contextItems(p) })}
+            onlistcontext={(name, paths, e) => (ctxMenu = { x: e.clientX, y: e.clientY, items: changelistItems(name, paths) })}
           />
         </div>
         <form class="commit" onsubmit={(e) => { e.preventDefault(); commit(); }}>
-          <textarea bind:value={message} placeholder="Commit message" rows="4"></textarea>
+          <textarea bind:value={message} bind:this={commitBox} placeholder="Commit message" rows="4"></textarea>
           <button class="primary" type="submit" disabled={!canCommit}>{commitLabel}</button>
         </form>
       </section>
@@ -915,6 +1085,7 @@
   </Modal>
 {:else if modal === "log"}
   <Modal title="Log: {relative(wc, log.target)}" wide onclose={() => (modal = null)}>
+    {#if log.purpose}<p class="purpose">{log.purpose}</p>{/if}
     <div class="log">
       <ul class="revs">
         {#each log.entries as e, i}
@@ -938,6 +1109,11 @@
       {/if}
     </div>
     {#snippet footer()}
+      {#if wc && !isURL(log.target)}
+        <button disabled={!log.entries[log.selected] || !!busy} onclick={() => updateToRevision(log.entries[log.selected])}>Update to this revision</button>
+        <button disabled={!log.entries[log.selected] || !!busy} onclick={() => undoRevision(log.entries[log.selected])}>Undo this revision...</button>
+        <span class="grow"></span>
+      {/if}
       <button onclick={() => (modal = null)}>Close</button>
       <button
         class="primary"
@@ -1049,6 +1225,56 @@
       onlogin={startLogin}
       cancel={() => cancelBusy?.()}
     />
+  </Modal>
+{:else if modal === "branch" && info}
+  <Modal title="New branch" onclose={() => (modal = null)}>
+    <p class="muted">
+      Copies {layout()?.line || info.relativeUrl} on the server as a new branch, in one commit. No files are transferred.
+    </p>
+    <!-- svelte-ignore a11y_autofocus -->
+    <label><span>Name</span><input bind:value={br.name} placeholder="feature-login" autofocus /></label>
+    {#if br.name.trim()}<p class="muted fine mono">{branchURL(br.name)}</p>{/if}
+    <label><span>Message</span><input bind:value={br.message} placeholder={`Create branch ${br.name.trim() || "..."}`} /></label>
+    <label class="check"><input type="checkbox" bind:checked={br.switchAfter} /> Switch this working copy to it</label>
+    {#if !layout()?.line}<p class="muted fine">This repository has no trunk or branches folder; the branch goes under ^/branches.</p>{/if}
+    {#snippet footer()}
+      <button onclick={() => (modal = null)}>Cancel</button>
+      <button class="primary" disabled={!br.name.trim() || /[\\/]/.test(br.name) || !!busy} onclick={submitBranch}>Create branch</button>
+    {/snippet}
+  </Modal>
+{:else if modal === "switch" && info}
+  <Modal title="Switch branch" onclose={() => (modal = null)}>
+    <p class="muted">Points this working copy at another branch. Your local changes come along; files that differ are updated.</p>
+    <ul class="choices">
+      {#each sw.choices as c (c.url)}
+        <li>
+          <button class:sel={info.url.startsWith(c.url + "/") || info.url === c.url} onclick={() => submitSwitch(c.url)} disabled={!!busy}>
+            <span>{c.label}</span>
+            {#if info.url.startsWith(c.url + "/") || info.url === c.url}<span class="muted">current</span>{/if}
+          </button>
+        </li>
+      {/each}
+      {#if sw.loading}<li class="muted">Reading branches...</li>{/if}
+    </ul>
+    <label><span>Or any url</span><input bind:value={sw.url} class="mono" /></label>
+    {#snippet footer()}
+      <button onclick={() => (modal = null)}>Cancel</button>
+      <button class="primary" disabled={!sw.url.trim() || sw.url === info?.url || !!busy} onclick={() => submitSwitch(sw.url)}>Switch to url</button>
+    {/snippet}
+  </Modal>
+{:else if modal === "changelist"}
+  <Modal title="Move to changelist" onclose={() => (modal = null)}>
+    <p class="muted">{cl.paths.length} {cl.paths.length === 1 ? "file" : "files"}. A changelist groups changes so you can commit them on their own; svn forgets it once they are committed.</p>
+    {#if changelists.length}
+      <div class="row wrap">
+        {#each changelists as name}<button onclick={() => moveToChangelist(name)}>{name}</button>{/each}
+      </div>
+    {/if}
+    <form class="row" onsubmit={(e) => { e.preventDefault(); moveToChangelist(cl.name); }}>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input bind:value={cl.name} placeholder="New changelist name" autofocus />
+      <button class="primary" type="submit" disabled={!cl.name.trim() || cl.name.trim().startsWith("-")}>Move</button>
+    </form>
   </Modal>
 {:else if modal === "details" && info}
   <Modal title="Working copy" onclose={() => (modal = null)}>
@@ -1165,7 +1391,6 @@
   .where { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; }
   .where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .where .path { font-family: var(--mono); font-size: 12px; font-weight: 600; }
-  .where .muted { font-family: var(--mono); font-size: 12px; }
   .rev { padding: 1px 8px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-family: var(--mono); font-size: 12px; font-weight: 700; }
 
   .welcome { display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; }
@@ -1236,6 +1461,16 @@
   .where[role="button"] { cursor: default; padding: 2px 4px 2px 8px; border-radius: var(--radius); }
   .where[role="button"]:hover { background: var(--hover); }
   .certnote { margin: 0; }
+  .purpose { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: var(--accent-soft); }
+  .wrap { flex-wrap: wrap; align-items: center; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .choices { margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); max-height: 40vh; overflow: auto; }
+  .choices button { display: flex; justify-content: space-between; width: 100%; border: 0; border-radius: 4px; background: transparent; text-align: left; padding: 5px 8px; font-family: var(--mono); font-size: 12px; }
+  .choices button:hover:not(:disabled) { background: var(--hover); }
+  .choices button.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  .choices li.muted { padding: 5px 8px; }
+  .where .branch { border: 0; background: transparent; padding: 1px 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .where .branch:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; user-select: text; }

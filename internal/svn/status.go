@@ -12,6 +12,7 @@ type StatusEntry struct {
 	Revision       int64  `json:"revision"`
 	Copied         bool   `json:"copied"`
 	TreeConflicted bool   `json:"treeConflicted"`
+	Changelist     string `json:"changelist"` // empty when the item is in no changelist
 }
 
 // StatusArgs lists ignored items too, for the collapsed Ignored group; svn stops at an ignored folder, so a build
@@ -24,36 +25,53 @@ func StatusArgs(path string) ([]string, error) {
 	return append([]string{"--xml", "--no-ignore"}, t...), nil
 }
 
+type statusXMLEntry struct {
+	Path string `xml:"path,attr"`
+	WC   struct {
+		Item           string `xml:"item,attr"`
+		Props          string `xml:"props,attr"`
+		Revision       int64  `xml:"revision,attr"`
+		Copied         bool   `xml:"copied,attr"`
+		TreeConflicted bool   `xml:"tree-conflicted,attr"`
+	} `xml:"wc-status"`
+}
+
+// ParseStatus flattens the targets; svn lists items that are in a changelist in a <changelist> block of their own
+// next to the targets, so those come out with the list's name.
 func ParseStatus(data []byte) ([]StatusEntry, error) {
 	var doc struct {
 		Targets []struct {
-			Entries []struct {
-				Path string `xml:"path,attr"`
-				WC   struct {
-					Item           string `xml:"item,attr"`
-					Props          string `xml:"props,attr"`
-					Revision       int64  `xml:"revision,attr"`
-					Copied         bool   `xml:"copied,attr"`
-					TreeConflicted bool   `xml:"tree-conflicted,attr"`
-				} `xml:"wc-status"`
-			} `xml:"entry"`
+			Entries []statusXMLEntry `xml:"entry"`
 		} `xml:"target"`
+		Changelists []struct {
+			Name    string           `xml:"name,attr"`
+			Entries []statusXMLEntry `xml:"entry"`
+		} `xml:"changelist"`
 	}
 	if err := xml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse svn status: %w", err)
 	}
 
 	entries := []StatusEntry{}
+	add := func(e statusXMLEntry, changelist string) {
+		entries = append(entries, StatusEntry{
+			Path:           e.Path,
+			Item:           e.WC.Item,
+			Props:          e.WC.Props,
+			Revision:       e.WC.Revision,
+			Copied:         e.WC.Copied,
+			TreeConflicted: e.WC.TreeConflicted,
+			Changelist:     changelist,
+		})
+	}
 	for _, t := range doc.Targets {
 		for _, e := range t.Entries {
-			entries = append(entries, StatusEntry{
-				Path:           e.Path,
-				Item:           e.WC.Item,
-				Props:          e.WC.Props,
-				Revision:       e.WC.Revision,
-				Copied:         e.WC.Copied,
-				TreeConflicted: e.WC.TreeConflicted,
-			})
+			add(e, "")
+		}
+	}
+	for _, cl := range doc.Changelists {
+		for _, e := range cl.Entries {
+			add(e, cl.Name)
 		}
 	}
 	return entries, nil

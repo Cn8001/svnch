@@ -28,8 +28,18 @@ func TestArgs_Builders(t *testing.T) {
 		"merge cherry pick": {func() ([]string, error) {
 			return MergeArgs(MergeRequest{Source: "^/trunk", Target: "/wc", Change: 12, DryRun: true})
 		}, []string{"--accept", "postpone", "-c", "12", "--dry-run", "--", "^/trunk", "/wc"}},
-		"shelve":   {func() ([]string, error) { return ShelveArgs("wip", "half done") }, []string{"-m", "half done", "--", "wip", "."}},
-		"unshelve": {func() ([]string, error) { return UnshelveArgs("wip") }, []string{"--", "wip"}},
+		"merge undo revision": {func() ([]string, error) {
+			return MergeArgs(MergeRequest{Source: "https://h/repo/trunk", Target: "/wc", Change: -12})
+		}, []string{"--accept", "postpone", "-c", "-12", "--", "https://h/repo/trunk", "/wc"}},
+		"update to revision": {func() ([]string, error) { return UpdateToArgs("/wc", 40) }, []string{"-r", "40", "--", "/wc"}},
+		"branch": {func() ([]string, error) {
+			return BranchArgs(BranchRequest{From: "^/trunk", To: "^/branches/x", Message: "Create branch x"})
+		}, []string{"--parents", "-m", "Create branch x", "--", "^/trunk", "^/branches/x"}},
+		"switch":            {func() ([]string, error) { return SwitchArgs("^/branches/x", "/wc") }, []string{"--", "^/branches/x", "/wc"}},
+		"changelist":        {func() ([]string, error) { return ChangelistArgs(" ui ", "/wc/a") }, []string{"ui", "--", "/wc/a"}},
+		"changelist remove": {func() ([]string, error) { return RemoveChangelistArgs("/wc/a") }, []string{"--remove", "--", "/wc/a"}},
+		"shelve":            {func() ([]string, error) { return ShelveArgs("wip", "half done") }, []string{"-m", "half done", "--", "wip", "."}},
+		"unshelve":          {func() ([]string, error) { return UnshelveArgs("wip") }, []string{"--", "wip"}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -58,6 +68,10 @@ func TestArgs_RejectBadRequests(t *testing.T) {
 		"merge without source":   func() ([]string, error) { return MergeArgs(MergeRequest{Target: "/wc"}) },
 		"shelve without name":    func() ([]string, error) { return ShelveArgs("", "") },
 		"unshelve without name":  func() ([]string, error) { return UnshelveArgs("") },
+		"update to revision 0":   func() ([]string, error) { return UpdateToArgs("/wc", 0) },
+		"branch without message": func() ([]string, error) { return BranchArgs(BranchRequest{From: "^/trunk", To: "^/branches/x"}) },
+		"switch without url":     func() ([]string, error) { return SwitchArgs("", "/wc") },
+		"changelist flag name":   func() ([]string, error) { return ChangelistArgs("--remove", "/wc/a") },
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -225,5 +239,24 @@ func TestParseShelfList_KeepsNames(t *testing.T) {
 	// Assert
 	if !slices.Equal(names, []string{"wip", "spike"}) {
 		t.Errorf("names = %q", names)
+	}
+}
+
+func TestParseStatus_ChangelistEntriesCarryTheirList(t *testing.T) {
+	// Arrange
+	data := []byte(`<status>
+<target path="/wc"><entry path="/wc/a"><wc-status item="modified" props="none"></wc-status></entry></target>
+<changelist name="ui"><entry path="/wc/b"><wc-status item="modified" props="none"></wc-status></entry></changelist>
+</status>`)
+
+	// Act
+	entries, err := ParseStatus(data)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Changelist != "" || entries[1].Path != "/wc/b" || entries[1].Changelist != "ui" {
+		t.Errorf("entries = %+v", entries)
 	}
 }

@@ -102,6 +102,50 @@ func (s *SVNService) Update(ctx context.Context, paths []string) (int64, error) 
 	return svn.ParseUpdate(out)
 }
 
+func (s *SVNService) UpdateTo(ctx context.Context, path string, revision int64) (int64, error) {
+	args, err := svn.UpdateToArgs(path, revision)
+	out, err := s.run(ctx, "", "update", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("update %s to r%d: %w", path, revision, err)
+	}
+	return svn.ParseUpdate(out)
+}
+
+// Branch returns the revision the copy was committed as.
+func (s *SVNService) Branch(ctx context.Context, req svn.BranchRequest) (int64, error) {
+	args, err := svn.BranchArgs(req)
+	out, err := s.run(ctx, "", "copy", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("branch %s: %w", req.To, err)
+	}
+	return svn.ParseCommit(out)
+}
+
+func (s *SVNService) Switch(ctx context.Context, wc, url string) (int64, error) {
+	args, err := svn.SwitchArgs(url, wc)
+	out, err := s.run(ctx, "", "switch", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("switch to %s: %w", url, err)
+	}
+	return svn.ParseUpdate(out)
+}
+
+func (s *SVNService) SetChangelist(ctx context.Context, name string, paths []string) error {
+	args, err := svn.ChangelistArgs(name, paths...)
+	if _, err := s.run(ctx, "", "changelist", args, err); err != nil {
+		return fmt.Errorf("changelist %s: %w", name, err)
+	}
+	return nil
+}
+
+func (s *SVNService) RemoveChangelist(ctx context.Context, paths []string) error {
+	args, err := svn.RemoveChangelistArgs(paths...)
+	if _, err := s.run(ctx, "", "changelist", args, err); err != nil {
+		return fmt.Errorf("remove from changelist: %w", err)
+	}
+	return nil
+}
+
 // Commit returns 0 when there was nothing to commit.
 func (s *SVNService) Commit(ctx context.Context, req svn.CommitRequest) (int64, error) {
 	args, err := svn.CommitArgs(req)

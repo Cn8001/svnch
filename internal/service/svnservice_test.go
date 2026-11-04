@@ -309,3 +309,34 @@ func TestCheckConnection_GivesUpOnASilentServer(t *testing.T) {
 		t.Errorf("took %s, want about 10s", took)
 	}
 }
+
+func TestBranch_CopiesOnTheServer(t *testing.T) {
+	// Arrange
+	runner := &fakeRunner{out: []byte("\nCommitted revision 91.\n")}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	rev, err := s.Branch(context.Background(), svn.BranchRequest{From: "https://h/r/trunk", To: "https://h/r/branches/x", Message: "Create branch x"})
+
+	// Assert
+	if err != nil || rev != 91 {
+		t.Fatalf("got (%d, %v)", rev, err)
+	}
+	if runner.subcommand != "copy" {
+		t.Errorf("ran %s, want copy", runner.subcommand)
+	}
+}
+
+func TestSwitch_ReturnsRevision(t *testing.T) {
+	// Arrange
+	runner := &fakeRunner{out: []byte("U    a.txt\nUpdated to revision 92.\n")}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	rev, err := s.Switch(context.Background(), "/wc", "https://h/r/branches/x")
+
+	// Assert
+	if err != nil || rev != 92 || runner.subcommand != "switch" {
+		t.Errorf("got (%d, %v) from %s", rev, err, runner.subcommand)
+	}
+}
