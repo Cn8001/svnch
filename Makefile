@@ -129,13 +129,11 @@ publish-check:
 	@git fetch --quiet origin && [ -n "$$(git branch -r --contains HEAD)" ] || \
 		{ echo "This commit is not on GitHub yet. Run: git push"; exit 1; }
 
-# build/ios is a template package that does not build on its own, so vet and
-# test stay on the app's packages.
 ## test: gofmt, vet, Go tests under -race, frontend type check
 test:
 	@out=$$(gofmt -l main.go internal); [ -z "$$out" ] || { echo "Not gofmt'd:"; echo "$$out"; exit 1; }
-	go vet . ./internal/...
-	go test -race ./internal/...
+	go vet ./...
+	go test -race ./...
 	cd frontend && npm run check
 
 ## bindings: regenerate the TypeScript bindings in frontend/bindings
