@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -252,6 +253,63 @@ func (s *SVNService) Discard(ctx context.Context, wc string, paths []string) (sv
 		}
 	}
 	return svn.DiscardResult{Reverted: len(plan.Revert), Removed: len(plan.Remove)}, nil
+}
+
+func (s *SVNService) Properties(ctx context.Context, target string) ([]svn.Property, error) {
+	args, err := svn.PropListArgs(target)
+	out, err := s.run(ctx, "", "proplist", args, err)
+	if err != nil {
+		return nil, fmt.Errorf("properties of %s: %w", target, err)
+	}
+	return svn.ParsePropList(out)
+}
+
+// SetProperty and DeleteProperty return the committed revision for a url target, and 0 for a working copy, where
+// the change waits for the next commit like any other.
+func (s *SVNService) SetProperty(ctx context.Context, req svn.PropRequest) (int64, error) {
+	args, err := svn.PropSetArgs(req)
+	out, err := s.run(ctx, "", "propset", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("set %s: %w", req.Name, err)
+	}
+	return svn.ParseCommit(out)
+}
+
+func (s *SVNService) DeleteProperty(ctx context.Context, req svn.PropRequest) (int64, error) {
+	args, err := svn.PropDelArgs(req)
+	out, err := s.run(ctx, "", "propdel", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("delete %s: %w", req.Name, err)
+	}
+	return svn.ParseCommit(out)
+}
+
+// Ignore adds each path's name to its folder's svn:ignore, the way TortoiseSVN's "Add to ignore list" does.
+func (s *SVNService) Ignore(ctx context.Context, paths []string) error {
+	byDir := map[string][]string{}
+	for _, p := range paths {
+		dir := filepath.Dir(p)
+		byDir[dir] = append(byDir[dir], filepath.Base(p))
+	}
+	for dir, names := range byDir {
+		props, err := s.Properties(ctx, dir)
+		if err != nil {
+			return fmt.Errorf("ignore in %s: %w", dir, err)
+		}
+		value := ""
+		for _, p := range props {
+			if p.Name == "svn:ignore" {
+				value = p.Value
+			}
+		}
+		for _, n := range names {
+			value = svn.AddIgnore(value, n)
+		}
+		if _, err := s.SetProperty(ctx, svn.PropRequest{Targets: []string{dir}, Name: "svn:ignore", Value: value}); err != nil {
+			return fmt.Errorf("ignore in %s: %w", dir, err)
+		}
+	}
+	return nil
 }
 
 func (s *SVNService) Resolve(ctx context.Context, accept string, paths []string) error {

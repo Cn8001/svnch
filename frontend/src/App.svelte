@@ -7,6 +7,7 @@
   import DiffView from "./lib/DiffView.svelte";
   import HistoryView from "./lib/HistoryView.svelte";
   import ConflictPanel from "./lib/ConflictPanel.svelte";
+  import PropertiesPanel from "./lib/PropertiesPanel.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
   import Modal from "./lib/Modal.svelte";
   import SvnMissing from "./lib/SvnMissing.svelte";
@@ -126,7 +127,7 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist" | "conflicts";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist" | "conflicts" | "props";
 
   let setup = $state<Setup | null>(null);
   let checkingSvn = $state(false);
@@ -680,6 +681,7 @@
         ? [{ label: "Resolve conflict...", action: () => openConflicts(path) }]
         : []),
       { label: "Discard changes..." + n, action: () => discard(paths), disabled: !under(paths).length },
+      ...(unversioned.length ? [{ label: "Add to ignore list" + (unversioned.length > 1 ? ` (${unversioned.length})` : ""), action: () => ignore(unversioned) }] : []),
       { label: "Delete..." + n, action: () => remove(paths, false), disabled: unversioned.length > 0 },
       { label: "Remove from svn, keep file..." + n, action: () => remove(paths, true), disabled: unversioned.length > 0 },
       { label: "Rename / move...", action: () => openMove(path), disabled: many || !versioned },
@@ -688,6 +690,7 @@
       { label: "Remove from changelist", action: () => leaveChangelist(sel.filter((x) => x.changelist).map((x) => x.path)), disabled: !sel.some((x) => x.changelist) },
       { separator: true },
       { label: "Show log", action: () => openLog(path), disabled: many || !versioned || e?.item === "added" || e?.item === "ignored" },
+      { label: "Properties...", action: () => openProps(path), disabled: many || !versioned },
       { label: "Copy path", action: () => Clipboard.SetText(path) },
     ];
   }
@@ -697,6 +700,29 @@
 
   let conflicts = $derived(entries.filter((e) => e.item === "conflicted" || e.treeConflicted || e.props === "conflicted"));
   let conflictFirst = $state("");
+  let propsOf = $state({ target: "", label: "", isDir: true });
+
+  // A tree row has no kind, so a path counts as a folder when it is the working copy, has no status of its own (the
+  // folder rows), or has changes below it.
+  function isFolder(path: string): boolean {
+    return path === wc || !entry(path) || entries.some((e) => e.path.startsWith(path) && /[\\/]/.test(e.path[path.length]));
+  }
+
+  function openProps(path: string, dir = isFolder(path)) {
+    propsOf = { target: path, label: path === wc ? baseName(wc) : relative(wc, path), isDir: dir };
+    modal = "props";
+  }
+
+  async function pickProps() {
+    const picked = await Dialogs.OpenFile({ Title: "Properties of", Directory: wc, CanChooseFiles: true, CanChooseDirectories: true, ButtonText: "Show properties" });
+    if (typeof picked === "string" && picked) openProps(picked, isFolder(picked) && !/\.[^\\/.]+$/.test(picked));
+  }
+
+  async function ignore(paths: string[]) {
+    if ((await run("Adding to the ignore list", () => svn.Ignore(paths))) === failed) return;
+    notice = `Ignored ${paths.length === 1 ? baseName(paths[0]) : `${paths.length} items`}. The folder's svn:ignore changed; commit it to share.`;
+    await refresh();
+  }
 
   function openConflicts(path = "") {
     conflictFirst = path;
@@ -799,6 +825,7 @@
     return [
       { label: "Details...", action: openDetails },
       { separator: true },
+      { label: "Properties...", action: () => openProps(wc, true) },
       { label: "Copy URL", action: () => info && Clipboard.SetText(info.url) },
       { label: "Copy repository root", action: () => info && Clipboard.SetText(info.repositoryRoot) },
       { label: "Copy working copy path", action: () => Clipboard.SetText(wc) },
@@ -1057,6 +1084,8 @@
         { label: "Update", action: update, hint: "Ctrl+U", disabled: !wc || !!busy },
         { label: "Commit", action: commit, hint: "Ctrl+Enter", disabled: !canCommit },
         { label: "Resolve conflicts...", action: () => openConflicts(), disabled: !conflicts.length },
+        { label: "Properties...", action: () => openProps(wc, true), disabled: !wc },
+        { label: "Properties of a file or folder...", action: pickProps, disabled: !wc },
         { label: "Discard all changes...", action: () => discard([wc]), disabled: !wc || !!busy || !entries.some((e) => e.item !== "ignored") },
         { separator: true as const },
         { label: "Details...", action: openDetails, disabled: !wc },
@@ -1535,6 +1564,10 @@
       <input bind:value={cl.name} placeholder="New changelist name" autofocus />
       <button class="primary" type="submit" disabled={!cl.name.trim() || cl.name.trim().startsWith("-")}>Move</button>
     </form>
+  </Modal>
+{:else if modal === "props"}
+  <Modal title="Properties: {propsOf.label}" wide onclose={() => (modal = null)}>
+    <PropertiesPanel target={propsOf.target} label={propsOf.label} isDir={propsOf.isDir} remote={false} exec={remote} onchanged={refresh} />
   </Modal>
 {:else if modal === "conflicts"}
   <Modal title="Resolve conflicts" wide onclose={() => (modal = null)}>

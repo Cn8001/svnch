@@ -457,3 +457,24 @@ func TestReadLocal_ReadsConflictMarkers(t *testing.T) {
 		t.Errorf("got (%+v, %v)", got, err)
 	}
 }
+
+func TestIgnore_AppendsToTheFoldersList(t *testing.T) {
+	// Arrange
+	dir := filepath.FromSlash("/wc/build")
+	list := fmt.Sprintf(`<properties><target path=%q><property name="svn:ignore">bin
+</property></target></properties>`, dir)
+	runner := &scriptRunner{outs: map[string][]byte{"proplist": []byte(list)}}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	err := s.Ignore(context.Background(), []string{filepath.Join(dir, "obj")})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "propset -- svn:ignore bin\nobj\n " + dir
+	if len(runner.ran) != 2 || runner.ran[1] != want {
+		t.Errorf("ran %q, want second call %q", runner.ran, want)
+	}
+}

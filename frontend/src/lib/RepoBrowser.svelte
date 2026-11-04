@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Clipboard, Dialogs } from "@wailsio/runtime";
   import ContextMenu from "./ContextMenu.svelte";
+  import PropertiesPanel from "./PropertiesPanel.svelte";
   import { svn, join, type FileContent, type ListEntry, type MenuItem, type Server } from "./svn";
 
   type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -49,6 +50,7 @@
   let viewer = $state<{ name: string; url: string; content: FileContent | null; error: string } | null>(null);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let note = $state("");
+  let propsOf = $state<{ url: string; name: string; isDir: boolean } | null>(null);
 
   // A file larger than this is offered for saving rather than shown; the viewer is for reading, not for assets.
   const VIEW_LIMIT = 2 << 20;
@@ -74,6 +76,7 @@
     typed = url;
     selected = "";
     viewer = null;
+    propsOf = null;
     entries = r.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1));
   }
 
@@ -205,6 +208,7 @@
       { separator: true },
       { label: "Copy URL", action: () => Clipboard.SetText(u) },
       { label: "Show log", action: () => onlog(u) },
+      { label: "Properties...", action: () => (propsOf = { url: u, name: e.name, isDir: dir }) },
       { separator: true },
       { label: "Rename / move...", action: () => startOp("rename", e.name) },
       { label: "Delete...", action: () => startOp("delete", e.name) },
@@ -297,6 +301,14 @@
             </button>
           </div>
         </form>
+      {:else if propsOf}
+        <div class="viewer">
+          <div class="tools vhead">
+            <button onclick={() => (propsOf = null)}>Back</button>
+            <b class="where" title={propsOf.url}>Properties of {propsOf.name}</b>
+          </div>
+          <PropertiesPanel target={propsOf.url} label={propsOf.name} isDir={propsOf.isDir} remote={true} {exec} />
+        </div>
       {:else if viewer}
         <div class="viewer">
           <div class="tools vhead">
