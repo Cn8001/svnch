@@ -8,11 +8,20 @@
     children,
     footer,
   }: { title: string; onclose: () => void; wide?: boolean; children: Snippet; footer?: Snippet } = $props();
+
+  let backdrop: HTMLDivElement | undefined = $state();
+
+  // The login can open over another window; Escape closes only the one on top.
+  function onkey(e: KeyboardEvent) {
+    if (e.key !== "Escape") return;
+    const all = document.querySelectorAll(".backdrop");
+    if (all[all.length - 1] === backdrop) onclose();
+  }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && onclose()} />
+<svelte:window onkeydown={onkey} />
 
-<div class="backdrop" role="presentation" onclick={onclose}>
+<div class="backdrop" role="presentation" onclick={onclose} bind:this={backdrop}>
   <!-- Escape is handled on the window, so the click guard needs no key handler of its own. -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="box" class:wide role="dialog" tabindex="-1" aria-label={title} onclick={(e) => e.stopPropagation()}>

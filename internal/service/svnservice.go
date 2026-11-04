@@ -46,6 +46,12 @@ func (s *SVNService) Logout() {
 	s.creds.SetCredentials("", "")
 }
 
+// LoggedInAs is the username svnch passes for this session; svn may also log in on its own with a password it saved.
+func (s *SVNService) LoggedInAs() string {
+	username, _ := s.creds.Credentials()
+	return username
+}
+
 // run takes the args builder's error as well, so each command reads as one line of build, run, parse.
 func (s *SVNService) run(ctx context.Context, dir, subcommand string, args []string, argErr error) ([]byte, error) {
 	if argErr != nil {
@@ -139,7 +145,11 @@ func (s *SVNService) Move(ctx context.Context, from, to string) error {
 	return nil
 }
 
+// List has a timeout because a server that never answers would otherwise hold the browser until the OS gives up on the
+// connection, which can be minutes.
 func (s *SVNService) List(ctx context.Context, target string) ([]svn.ListEntry, error) {
+	ctx, stop := context.WithTimeout(ctx, time.Minute)
+	defer stop()
 	args, err := svn.ListArgs(target)
 	out, err := s.run(ctx, "", "list", args, err)
 	if err == nil {

@@ -9,6 +9,9 @@
     onremove,
     oncheckout,
     onlog,
+    check,
+    cancel,
+    onlogin,
   }: {
     servers: Server[];
     list: (url: string) => Promise<ListEntry[] | null>; // null when it failed; the caller already reported why
@@ -16,6 +19,9 @@
     onremove: (url: string) => Promise<void>;
     oncheckout: (url: string) => void;
     onlog: (url: string) => void;
+    check: (url: string, username: string) => Promise<{ ok: boolean; text: string; username: string }>;
+    onlogin: (url: string) => void;
+    cancel: () => void; // stops the svn call that is running, for a server that does not answer
   } = $props();
 
   let server = $state<Server | null>(null);
@@ -26,6 +32,8 @@
   let loading = $state(false);
   let form = $state<Server | null>(null);
   let editing = $state("");
+  let checked = $state<{ ok: boolean; text: string } | null>(null);
+  let checking = $state(false);
 
   let target = $derived(selected ? child(url, selected) : url);
   let canUp = $derived(!!server && !!url && url.replace(/\/+$/, "") !== server.url.replace(/\/+$/, ""));
@@ -57,11 +65,23 @@
   function startAdd() {
     form = { name: "", url: typed && !server ? typed : "", username: "" };
     editing = "";
+    checked = null;
   }
 
   function startEdit(s: Server) {
     form = { ...s };
     editing = s.url;
+    checked = null;
+  }
+
+  async function checkConnection() {
+    if (!form || !form.url.trim()) return;
+    checking = true;
+    checked = null;
+    const r = await check(form.url, form.username);
+    checking = false;
+    if (form && r.ok && !form.username && r.username) form.username = r.username;
+    checked = r;
   }
 
   async function save() {
@@ -105,6 +125,7 @@
     <div class="tools">
       <button onclick={startAdd}>Add...</button>
       <button disabled={!server} onclick={() => server && startEdit(server)}>Edit...</button>
+      <button disabled={!server} onclick={() => server && onlogin(server.url)}>Log in...</button>
       <button disabled={!server} onclick={async () => { if (server) { await onremove(server.url); server = null; entries = []; url = ""; } }}>Remove</button>
     </div>
   </aside>
@@ -113,11 +134,18 @@
     {#if form}
       <form class="form" onsubmit={(e) => { e.preventDefault(); save(); }}>
         <b>{editing ? "Edit server" : "Add server"}</b>
-        <label><span>Server or repository URL</span><input bind:value={form.url} placeholder="https://svn.example.org/svn" /></label>
+        <label><span>Server or repository URL</span><input bind:value={form.url} oninput={() => (checked = null)} placeholder="https://svn.example.org/svn" /></label>
         <p class="muted fine">Give the server's address to pick from the repositories on it, or one repository's own URL.</p>
         <label><span>Name (optional)</span><input bind:value={form.name} placeholder="Work" /></label>
         <label><span>Username (optional)</span><input bind:value={form.username} /></label>
+        {#if checked}<p class="fine" class:bad={!checked.ok}>{checked.text}</p>{/if}
         <div class="tools">
+          {#if checking}
+            <button type="button" onclick={cancel}>Stop checking</button>
+          {:else}
+            <button type="button" disabled={!form.url.trim()} onclick={checkConnection}>Check connection</button>
+          {/if}
+          <span class="grow"></span>
           <button type="button" onclick={() => (form = null)}>Cancel</button>
           <button class="primary" type="submit" disabled={!form.url.trim()}>Save</button>
         </div>
@@ -126,7 +154,11 @@
       <form class="path" onsubmit={(e) => { e.preventDefault(); if (typed.trim()) open(typed.trim()); }}>
         <button type="button" disabled={!canUp || loading} onclick={up}>Up</button>
         <input bind:value={typed} placeholder="Pick a server, or type a URL" />
-        <button type="submit" disabled={!typed.trim() || loading}>Go</button>
+        {#if loading}
+          <button type="button" onclick={cancel}>Stop</button>
+        {:else}
+          <button type="submit" disabled={!typed.trim()}>Go</button>
+        {/if}
       </form>
       <div class="table">
         <div class="row hdr"><span>Name</span><span>Size</span><span>Rev</span><span>Author</span><span>Date</span></div>

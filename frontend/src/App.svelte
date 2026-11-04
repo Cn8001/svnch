@@ -56,14 +56,15 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "login" | "repos" | "svn";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn";
 
   let setup = $state<Setup | null>(null);
   let checkingSvn = $state(false);
   let servers: Server[] = $state([]);
-  let login = $state({ url: "", username: "", password: "", error: "", busy: false });
+  let login = $state({ url: "", username: "", password: "", error: "", busy: false, manual: false }); // manual: opened by the user, so the url is editable
+  let sessionUser = $state("");
   let loginDone: ((ok: boolean) => void) | null = null;
-  let loginBack: ModalKind | null = null;
+  let loginOpen = $state(false); // over whatever window asked, so a half-filled form there survives the login
 
   let appInfo: AppInfo | null = $state(null);
   let updateNote = $state("");
@@ -121,23 +122,26 @@
     }
   }
 
-  function askLogin(url: string, message = ""): Promise<boolean> {
+  function askLogin(url: string, message = "", manual = false): Promise<boolean> {
     const known = servers.find((s) => url.startsWith(s.url));
-    login = { url, username: known?.username || login.username, password: "", error: message, busy: false };
-    loginBack = modal === "login" ? loginBack : modal;
-    modal = "login";
+    login = { url, username: known?.username || login.username, password: "", error: message, busy: false, manual };
+    loginOpen = true;
     return new Promise((resolve) => (loginDone = resolve));
   }
 
   function finishLogin(ok: boolean) {
-    modal = loginBack;
-    loginBack = null;
+    loginOpen = false;
     loginDone?.(ok);
     loginDone = null;
   }
 
+  function startLogin(url = "") {
+    askLogin(url || info?.repositoryRoot || servers[0]?.url || "", "", true);
+  }
+
   async function submitLogin() {
-    if (!login.username) return;
+    login.url = login.url.trim().replace(/\/+$/, "");
+    if (!login.username || !login.url) return;
     login.busy = true;
     login.error = "";
     try {
@@ -148,6 +152,7 @@
       return;
     }
     login.busy = false;
+    sessionUser = login.username;
     const known = servers.find((s) => login.url.startsWith(s.url));
     if (known && known.username !== login.username) {
       try {
@@ -384,6 +389,20 @@
     return r === failed ? null : (r ?? []);
   }
 
+  // The check goes through run, so a server that wants a password brings up the login with the form's username.
+  async function checkServer(url: string, username: string) {
+    const target = url.trim().replace(/\/+$/, "");
+    if (username) login.username = username;
+    const r = await run(`Connecting to ${target}`, () => svn.List(target), target);
+    if (r === failed) return { ok: false, text: error || "Could not connect.", username: "" };
+    const n = (r ?? []).length;
+    return {
+      ok: true,
+      text: `Connected. ${n} ${n === 1 ? "entry" : "entries"} at this address.`,
+      username: login.url.startsWith(target) ? login.username : "",
+    };
+  }
+
   async function saveServer(s: Server) {
     try {
       await ServerService.Save(s);
@@ -406,6 +425,7 @@
 
   async function forgetLogin() {
     await svn.Logout();
+    sessionUser = "";
     updateNote = "Forgotten for this session. svn may still have the password saved in its own store.";
   }
 
@@ -498,6 +518,9 @@
     updateNote = "";
     modal = "settings";
     try {
+      sessionUser = await svn.LoggedInAs();
+    } catch {}
+    try {
       explorerMenu = await ExplorerService.Status();
     } catch {}
   }
@@ -576,7 +599,7 @@
   ]);
 
   function onKey(e: KeyboardEvent) {
-    if (modal || ctxMenu) return;
+    if (modal || loginOpen || ctxMenu) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "F5") {
       e.preventDefault();
@@ -862,9 +885,14 @@
     <div class="setting">
       <div>
         <b>Login</b>
-        <p class="muted">Drop the username and password svnch keeps for this session.</p>
+        <p class="muted">
+          {sessionUser ? `Logged in as ${sessionUser} for this session.` : "Not logged in this session; svn may still use a password it saved."}
+        </p>
       </div>
-      <button onclick={forgetLogin}>Forget login</button>
+      <div class="buttons">
+        <button onclick={() => startLogin()}>{sessionUser ? "Switch user..." : "Log in..."}</button>
+        <button onclick={forgetLogin}>Forget login</button>
+      </div>
     </div>
     {#if explorerMenu?.supported}
       <div class="setting">
@@ -877,23 +905,6 @@
     {/if}
     {#if updateNote}<p>{updateNote}</p>{/if}
   </Modal>
-{:else if modal === "login"}
-  <Modal title="Login" onclose={() => finishLogin(false)}>
-    <form class="login" onsubmit={(e) => { e.preventDefault(); submitLogin(); }}>
-      <p>The server asks who you are.</p>
-      <p class="muted where" title={login.url}>{login.url}</p>
-      <!-- svelte-ignore a11y_autofocus -->
-      <label><span>Username</span><input bind:value={login.username} autofocus={!login.username} autocomplete="username" /></label>
-      <!-- svelte-ignore a11y_autofocus -->
-      <label><span>Password</span><input type="password" bind:value={login.password} autofocus={!!login.username} autocomplete="current-password" /></label>
-      {#if login.error}<p class="error">{login.error}</p>{/if}
-      <p class="muted fine">svn saves the password in your system keyring when it can. Where it cannot, svnch keeps it until you close the app.</p>
-      <div class="end">
-        <button type="button" onclick={() => finishLogin(false)}>Cancel</button>
-        <button class="primary" type="submit" disabled={!login.username || login.busy}>{login.busy ? "Checking..." : "Log in"}</button>
-      </div>
-    </form>
-  </Modal>
 {:else if modal === "repos"}
   <Modal title="Repositories" wide onclose={() => (modal = null)}>
     <RepoBrowser
@@ -903,6 +914,9 @@
       onremove={removeServer}
       oncheckout={(url) => openCheckout(url)}
       onlog={(url) => openLog(url)}
+      check={checkServer}
+      onlogin={startLogin}
+      cancel={() => cancelBusy?.()}
     />
   </Modal>
 {:else if modal === "svn"}
@@ -912,6 +926,33 @@
     {:else}
       <SvnMissing {setup} checking={checkingSvn} oncheck={checkSvn} />
     {/if}
+  </Modal>
+{/if}
+
+{#if loginOpen}
+  <Modal title="Login" onclose={() => finishLogin(false)}>
+    <form class="login" onsubmit={(e) => { e.preventDefault(); submitLogin(); }}>
+      {#if login.manual}
+        <p>Log in to a server for this session.</p>
+        <label><span>Server</span><input bind:value={login.url} list="login-servers" placeholder="https://svn.example.org/svn" /></label>
+        <datalist id="login-servers">
+          {#each servers as s (s.url)}<option value={s.url}>{s.name}</option>{/each}
+        </datalist>
+      {:else}
+        <p>The server asks who you are.</p>
+        <p class="muted where" title={login.url}>{login.url}</p>
+      {/if}
+      <!-- svelte-ignore a11y_autofocus -->
+      <label><span>Username</span><input bind:value={login.username} autofocus={!login.username} autocomplete="username" /></label>
+      <!-- svelte-ignore a11y_autofocus -->
+      <label><span>Password</span><input type="password" bind:value={login.password} autofocus={!!login.username} autocomplete="current-password" /></label>
+      {#if login.error}<p class="error">{login.error}</p>{/if}
+      <p class="muted fine">svn saves the password in your system keyring when it can. Where it cannot, svnch keeps it until you close the app.</p>
+      <div class="end">
+        <button type="button" onclick={() => finishLogin(false)}>Cancel</button>
+        <button class="primary" type="submit" disabled={!login.username || !login.url.trim() || login.busy}>{login.busy ? "Checking..." : "Log in"}</button>
+      </div>
+    </form>
   </Modal>
 {/if}
 
@@ -999,6 +1040,7 @@
   .ver { font-weight: normal; color: var(--muted); }
   .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
   .setting p { margin: 4px 0 0; }
+  .setting .buttons { display: flex; gap: 6px; }
   .setting + .setting { margin-top: 8px; padding-top: 10px; border-top: 1px dotted var(--muted); }
   .login { display: grid; gap: 10px; }
   .login p { margin: 0; }

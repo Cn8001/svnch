@@ -62,7 +62,7 @@ func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...st
 	}
 	full = append(full, args...)
 
-	cmd := exec.CommandContext(ctx, r.binary, full...)
+	cmd := command(ctx, r.binary, full...)
 	if username != "" {
 		cmd.Stdin = strings.NewReader(password + "\n")
 	}

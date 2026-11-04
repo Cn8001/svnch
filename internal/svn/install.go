@@ -32,7 +32,7 @@ func Detect(ctx context.Context, binary, problem string) Setup {
 		binary = path
 	}
 	s.Binary = binary
-	if out, err := exec.CommandContext(ctx, binary, "--version", "--quiet").Output(); err == nil {
+	if out, err := command(ctx, binary, "--version", "--quiet").Output(); err == nil {
 		s.Version = strings.TrimSpace(string(out))
 	}
 	return s
@@ -48,7 +48,7 @@ func EnsureInstalled(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("install svn: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := command(ctx, args[0], args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
