@@ -64,7 +64,9 @@ func (r *ExecRunner) Run(ctx context.Context, dir, subcommand string, args ...st
 
 	cmd := command(ctx, r.binary, full...)
 	if username != "" {
-		cmd.Stdin = strings.NewReader(password + "\n")
+		// No newline: svn on Windows ends the line at \r\n only, so a trailing \n became part of the password. Without
+		// one, svn reads to the end of stdin on every system.
+		cmd.Stdin = strings.NewReader(password)
 	}
 	cmd.Dir = dir
 	// Keeps stderr in English so error codes and messages read the same on every machine.

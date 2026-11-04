@@ -3,6 +3,9 @@ package svn
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -137,5 +140,36 @@ func TestCommandError_CertLaterInTheChainIsCert(t *testing.T) {
 	// Assert
 	if !cert {
 		t.Errorf("errors.Is(ErrCertUntrusted) = false for %q", stderr)
+	}
+}
+
+func TestExecRunner_PasswordGoesToStdinWithoutNewline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as svn")
+	}
+	// Arrange
+	dir := t.TempDir()
+	out := filepath.Join(dir, "stdin")
+	fake := filepath.Join(dir, "svn")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat > \"$SVNCH_TEST_STDIN\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SVNCH_TEST_STDIN", out)
+	r := NewExecRunner(fake)
+	r.SetCredentials("me", "secret")
+
+	// Act
+	_, err := r.Run(context.Background(), "", "info", "--", "https://h/r")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "secret" {
+		t.Errorf("svn read %q from stdin, want %q", got, "secret")
 	}
 }
