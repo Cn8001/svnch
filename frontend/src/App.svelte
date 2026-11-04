@@ -67,6 +67,12 @@
   <MenuBar {menus} />
 
   <div class="toolbar">
+    <button class="project" title={s.wc ? `${s.wc}, click to switch to another working copy` : "Open or switch to a working copy"} onclick={(e) => below(e, projectItems(s, a))} disabled={s.svnMissing}>
+      <svg class="folder" viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 3.5h4.5l1.5 1.5h7v8h-13z" fill="currentColor" /></svg>
+      <span class="pname">{s.wc ? baseName(s.wc) : "No working copy"}</span>
+      <svg viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+    </button>
+    <span class="sep"></span>
     <button onclick={s.openFolder} disabled={!!s.busy || s.svnMissing}>Open...</button>
     <button onclick={() => a.openRepos()} disabled={!!s.busy || s.svnMissing}>Repos</button>
     <span class="sep"></span>
@@ -75,10 +81,6 @@
     <button onclick={() => a.openLog(s.wc)} disabled={!s.wc || !!s.busy}>Log</button>
     {#if s.info}
       <div class="where" role="button" tabindex="-1" title="Right-click for details" oncontextmenu={(e) => { e.preventDefault(); popup(e, wcItems(s, a)); }} ondblclick={a.openDetails}>
-        <button class="project" title="{s.wc}, click to switch to another working copy" onclick={(e) => below(e, projectItems(s, a))}>
-          <span class="pname">{baseName(s.wc)}</span>
-          <svg viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        </button>
         <button class="branch" title="{s.info.url}, click to switch branch" onclick={() => s.show({ kind: "switch" })} disabled={!!s.busy}>{s.info.relativeUrl || s.info.url}</button>
         <span class="rev">r{s.info.revision}</span>
       </div>
@@ -186,7 +188,8 @@
   .where { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; cursor: default; padding: 2px 4px 2px 8px; border-radius: var(--radius); }
   .where:hover { background: var(--hover); }
   .where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .project { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-weight: 600; max-width: 32ch; }
+  .project { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-weight: 600; max-width: 28ch; }
+  .project .folder { flex: none; color: var(--blue); }
   .project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch { border: 0; background: transparent; padding: 1px 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
   .branch:hover:not(:disabled) { background: var(--hover); color: var(--text); }
