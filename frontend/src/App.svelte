@@ -39,6 +39,43 @@
 
   const REPO_URL = "https://github.com/Cn8001/svnch";
   const LAST_WC = "svnch.lastWorkingCopy";
+  const RECENT = "svnch.recentWorkingCopies";
+  let recent = $state<string[]>(readRecent());
+
+  function readRecent(): string[] {
+    try {
+      const list = JSON.parse(localStorage.getItem(RECENT) ?? "[]");
+      return Array.isArray(list) ? list.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveRecent(list: string[]) {
+    recent = list.slice(0, 12);
+    try {
+      localStorage.setItem(RECENT, JSON.stringify(recent));
+    } catch {}
+  }
+
+  function baseName(path: string): string {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+
+  function parentOf(path: string): string {
+    return path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+  }
+
+  // projectItems is the switcher behind the working copy's name in the toolbar.
+  function projectItems(): MenuItem[] {
+    return [
+      ...recent.map((p) => ({ label: baseName(p), hint: parentOf(p), action: () => openWC(p), disabled: p === wc || !!busy })),
+      ...(recent.length ? [{ separator: true as const }] : []),
+      { label: "Open working copy...", action: openFolder, disabled: !!busy },
+      { label: "Checkout...", action: () => openCheckout(), disabled: !!busy },
+      ...(recent.length > 1 ? [{ label: "Clear this list", action: () => saveRecent(wc ? [wc] : []) }] : []),
+    ];
+  }
   const THEME = "svnch.theme";
 
   type Theme = "dark" | "light" | "system";
@@ -263,6 +300,7 @@
     try {
       localStorage.setItem(LAST_WC, path);
     } catch {}
+    saveRecent([path, ...recent.filter((p) => p !== path)]);
   }
 
   async function openFolder() {
@@ -277,7 +315,10 @@
 
   async function openWC(dir: string) {
     const i = await run(`Reading ${dir}`, () => svn.Info(dir));
-    if (i === failed) return;
+    if (i === failed) {
+      if (lastFailure === "NOT_WORKING_COPY") saveRecent(recent.filter((p) => p !== dir));
+      return;
+    }
     info = i;
     wc = i.workingCopyRoot || dir;
     remember(wc);
@@ -745,7 +786,20 @@
     modal = null;
     const req: CheckoutRequest = { url: co.url.trim(), path: co.path.trim(), revision: rev, depth: co.depth };
     const r = await run(`Checking out ${req.url}`, () => svn.Checkout(req), req.url);
-    if (r === failed) return;
+    if (r === failed) {
+      // svn can fail at the very end (an external, a warning it counts as an error) after the working copy is
+      // complete; open what is there, and leave the error in the status bar.
+      const why = errorFull;
+      try {
+        await svn.Info(req.path);
+      } catch {
+        return;
+      }
+      await openWC(req.path);
+      error = errorText(why);
+      errorFull = why;
+      return;
+    }
     await openWC(req.path);
     notice = `Checked out revision ${r}.`;
   }
@@ -984,7 +1038,14 @@
     <button onclick={() => openLog(wc)} disabled={!wc || !!busy}>Log</button>
     {#if info}
       <div class="where" role="button" tabindex="-1" title="Right-click for details" oncontextmenu={(e) => { e.preventDefault(); ctxMenu = { x: e.clientX, y: e.clientY, items: wcItems() }; }} ondblclick={openDetails}>
-        <span class="path" title={wc}>{wc}</span>
+        <button
+          class="project"
+          title="{wc}, click to switch to another working copy"
+          onclick={(e) => { const b = (e.currentTarget as HTMLElement).getBoundingClientRect(); ctxMenu = { x: b.left, y: b.bottom + 4, items: projectItems() }; }}
+        >
+          <span class="pname">{baseName(wc)}</span>
+          <svg viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
         <button class="branch" title="{info.url}, click to switch branch" onclick={openSwitch} disabled={!!busy}>{info.relativeUrl || info.url}</button>
         <span class="rev">r{info.revision}</span>
       </div>
@@ -1005,6 +1066,13 @@
         <button onclick={() => openCheckout()} disabled={!!busy}>Checkout...</button>
         <button onclick={() => openRepos()} disabled={!!busy}>Browse repositories...</button>
       </div>
+      {#if recent.length}
+        <ul class="recent">
+          {#each recent as p (p)}
+            <li><button onclick={() => openWC(p)} disabled={!!busy} title={p}><b>{baseName(p)}</b><span class="muted">{parentOf(p)}</span></button></li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   {:else}
     <main>
@@ -1461,7 +1529,12 @@
   .toolbar .sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line); }
   .where { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; }
   .where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .where .path { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .project { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-weight: 600; max-width: 32ch; }
+  .project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; width: min(520px, 90vw); text-align: left; }
+  .recent button { display: flex; align-items: baseline; gap: 10px; width: 100%; border-color: transparent; background: transparent; padding: 6px 10px; }
+  .recent button:hover:not(:disabled) { background: var(--hover); border-color: var(--line); }
+  .recent span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
   .rev { padding: 1px 8px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-family: var(--mono); font-size: 12px; font-weight: 700; }
 
   .welcome { display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; }

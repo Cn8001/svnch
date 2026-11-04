@@ -32,7 +32,7 @@
         <button
           disabled={item.disabled}
           onclick={(e) => { e.stopPropagation(); onclose(); item.action(); }}
-        >{item.label}</button>
+        ><span>{item.label}</span>{#if item.hint}<span class="hint">{item.hint}</span>{/if}</button>
       </li>
     {/if}
   {/each}
@@ -52,7 +52,9 @@
     box-shadow: var(--shadow);
   }
   button {
-    display: block;
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
     width: 100%;
     border: 0;
     border-radius: 4px;
@@ -61,5 +63,7 @@
     text-align: left;
   }
   button:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+  .hint { color: var(--muted); font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button:hover:not(:disabled) .hint { color: inherit; opacity: 0.75; }
   .sep { border-top: 1px solid var(--line); margin: 4px 6px; }
 </style>
