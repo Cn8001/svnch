@@ -25,6 +25,7 @@ func ParseCollection(page []byte) ([]ListEntry, error) {
 	d.Entity = xml.HTMLEntity
 
 	var hrefs []string
+	var title strings.Builder
 	marked, inTitle := false, false
 	for {
 		tok, err := d.Token()
@@ -48,11 +49,15 @@ func ParseCollection(page []byte) ([]ListEntry, error) {
 		case xml.EndElement:
 			inTitle = false
 		case xml.CharData:
+			if inTitle && title.Len() < 120 {
+				title.WriteString(strings.TrimSpace(string(t)))
+			}
 			marked = marked || (inTitle && strings.TrimSpace(string(t)) == collectionTitle)
 		}
 	}
 	if !marked {
-		return nil, ErrNotCollection
+		// The title is what the user can tell us about a server whose index svnch does not read yet.
+		return nil, fmt.Errorf("its page %q is not a list of repositories: %w", title.String(), ErrNotCollection)
 	}
 
 	entries := []ListEntry{}

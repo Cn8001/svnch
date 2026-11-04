@@ -1274,6 +1274,7 @@
       start={reposAt}
       onlogin={startLogin}
       exec={remote}
+      known={info ? [info.repositoryRoot] : []}
       cancel={() => cancelBusy?.()}
     />
   </Modal>
@@ -1447,7 +1448,7 @@
 {/if}
 
 <style>
-  .app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100%; }
+  .app { display: grid; grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); height: 100%; }
 
   .toolbar {
     display: flex;

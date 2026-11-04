@@ -264,7 +264,8 @@ func (s *SVNService) List(ctx context.Context, target string) ([]svn.ListEntry, 
 	case errors.Is(idxErr, svn.ErrAuthFailed):
 		return nil, fmt.Errorf("list %s: %w", target, idxErr)
 	}
-	return nil, fmt.Errorf("list %s: %w", target, err)
+	// svn's error stays the one to match on; the index's says why the server root did not list either.
+	return nil, fmt.Errorf("list %s: %w; as a server root: %v", target, err, idxErr)
 }
 
 // serverRoot tells whether a failed list may have been pointed at the folder holding the repositories; only a web

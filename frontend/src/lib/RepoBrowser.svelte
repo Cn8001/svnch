@@ -18,6 +18,7 @@
     cancel,
     onlogin,
     exec,
+    known = [],
   }: {
     servers: Server[];
     list: (url: string) => Promise<ListEntry[] | string>; // a string is why it failed
@@ -30,6 +31,7 @@
     start?: string; // a url to open straight away, as from the working copy's "Browse on server"
     cancel: () => void; // stops the svn call that is running, for a server that does not answer
     exec: <T>(label: string, make: () => Promise<T>, url: string) => Promise<Result<T>>; // runs through the app's login and status bar
+    known?: string[]; // repository urls svnch already knows, such as the open working copy's, offered when a server root cannot be listed
   } = $props();
 
   let server = $state<Server | null>(null);
@@ -340,6 +342,10 @@
                 <b>Could not open {typed}</b>
                 <p>{failure}</p>
                 {#if typed.startsWith("http://")}<p class="muted">Many servers, VisualSVN Server among them, only answer on https://. Try {typed.replace("http://", "https://")}</p>{/if}
+                {#each known.filter((k) => k.startsWith(typed.replace(/\/+$/, "") + "/")) as k}
+                  <p class="muted">Your open working copy is in this repository on that server:</p>
+                  <div><button onclick={() => open(k)}>Open {k.slice(typed.replace(/\/+$/, "").length + 1)}</button></div>
+                {/each}
               </div>
             {:else}
               <p class="muted empty">{loading ? "Loading..." : url ? "This folder is empty." : "Pick a server on the left, or type an address above."}</p>
