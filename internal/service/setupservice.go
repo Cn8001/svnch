@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Cn8001/svnch/internal/svn"
 )
@@ -22,4 +23,13 @@ func NewSetupService(binary string, installErr error) *SetupService {
 
 func (s *SetupService) Status(ctx context.Context) svn.Setup {
 	return svn.Detect(ctx, s.binary, s.problem)
+}
+
+// CreateRepository makes an empty repository in folder with the svnadmin that came with svn, and returns its url.
+func (s *SetupService) CreateRepository(ctx context.Context, folder string) (string, error) {
+	setup := svn.Detect(ctx, s.binary, s.problem)
+	if setup.Binary == "" {
+		return "", fmt.Errorf("create repository: %w", svn.ErrSvnNotFound)
+	}
+	return svn.CreateRepository(ctx, setup.Binary, folder)
 }

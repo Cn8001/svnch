@@ -8,6 +8,7 @@
   import HistoryView from "./lib/HistoryView.svelte";
   import ConflictPanel from "./lib/ConflictPanel.svelte";
   import PropertiesPanel from "./lib/PropertiesPanel.svelte";
+  import BlameView from "./lib/BlameView.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
   import Modal from "./lib/Modal.svelte";
   import SvnMissing from "./lib/SvnMissing.svelte";
@@ -24,6 +25,7 @@
     type ExplorerStatus,
     type Launch,
     type ServerCert,
+    type BlameLine,
     type Server,
     type Setup,
     type AppInfo,
@@ -127,7 +129,7 @@
 
   let ctxMenu: { x: number; y: number; items: MenuItem[] } | null = $state(null);
 
-  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist" | "conflicts" | "props";
+  type ModalKind = "checkout" | "move" | "confirm" | "merge" | "shelve" | "unshelve" | "log" | "help" | "text" | "about" | "settings" | "licenses" | "repos" | "svn" | "details" | "branch" | "switch" | "changelist" | "conflicts" | "props" | "lock" | "relocate" | "import";
 
   let setup = $state<Setup | null>(null);
   let checkingSvn = $state(false);
@@ -378,7 +380,8 @@
     }
   }
 
-  let pane = $state<"diff" | "history">("diff");
+  let pane = $state<"diff" | "history" | "blame">("diff");
+  let blame = $state({ target: "", lines: [] as BlameLine[], loading: false });
   let history = $state({ entries: [] as LogEntry[], loading: false, wc: "" });
 
   // History is read when its tab opens and again after anything that moves the working copy, so "you are here"
@@ -395,7 +398,7 @@
     history.wc = wc;
   }
 
-  function showPane(p: "diff" | "history") {
+  function showPane(p: "diff" | "history" | "blame") {
     pane = p;
     if (p === "history" && (history.wc !== wc || !history.entries.length)) loadHistory();
   }
@@ -690,6 +693,14 @@
       { label: "Remove from changelist", action: () => leaveChangelist(sel.filter((x) => x.changelist).map((x) => x.path)), disabled: !sel.some((x) => x.changelist) },
       { separator: true },
       { label: "Show log", action: () => openLog(path), disabled: many || !versioned || e?.item === "added" || e?.item === "ignored" },
+      { label: "Diff with previous version", action: () => diffPrevious(path), disabled: many || !versioned || folder || e?.item === "added" },
+      { label: "Blame", action: () => openBlame(path), disabled: many || !versioned || folder || e?.item === "added" },
+      { separator: true },
+      e?.locked
+        ? { label: "Release lock", action: () => unlock(sel.filter((x) => x.locked).map((x) => x.path)) }
+        : { label: "Get lock..." + n, action: () => openLock(paths), disabled: !versioned || folder },
+      { label: "Create patch..." + n, action: () => createPatch(paths), disabled: !sel.some(hasChanges) && !folder },
+      ...(versioned && !folder && e?.item !== "added" ? [{ label: "Unversion and add to ignore list" + n, action: () => unversionIgnore(paths) }] : []),
       { label: "Properties...", action: () => openProps(path), disabled: many || !versioned },
       { label: "Copy path", action: () => Clipboard.SetText(path) },
     ];
@@ -706,6 +717,125 @@
   // folder rows), or has changes below it.
   function isFolder(path: string): boolean {
     return path === wc || !entry(path) || entries.some((e) => e.path.startsWith(path) && /[\\/]/.test(e.path[path.length]));
+  }
+
+  let lockState = $state({ paths: [] as string[], message: "", steal: false });
+  let relocateTo = $state("");
+  let importState = $state({ path: "", url: "", message: "" });
+
+  async function cleanup() {
+    if ((await run("Cleaning up", () => svn.Cleanup(wc))) !== failed) notice = "Cleaned up.";
+    await refresh();
+  }
+
+  async function upgrade(dir = wc): Promise<boolean> {
+    if ((await run("Upgrading the working copy", () => svn.Upgrade(dir))) === failed) return false;
+    notice = "The working copy now uses this svn's format.";
+    return true;
+  }
+
+  function openLock(paths: string[]) {
+    lockState = { paths, message: "", steal: false };
+    modal = "lock";
+  }
+
+  async function submitLock() {
+    const { paths, message, steal } = lockState;
+    modal = null;
+    if ((await run("Getting the lock", () => svn.Lock(paths, message, steal), info?.repositoryRoot)) !== failed) {
+      notice = `Locked ${paths.length === 1 ? baseName(paths[0]) : `${paths.length} files`}. Others cannot commit ${paths.length === 1 ? "it" : "them"} until you release the lock or commit.`;
+    }
+    await refresh();
+  }
+
+  async function unlock(paths: string[]) {
+    if ((await run("Releasing the lock", () => svn.Unlock(paths, false), info?.repositoryRoot)) !== failed) notice = "Lock released.";
+    await refresh();
+  }
+
+  function openRelocate() {
+    relocateTo = info?.url ?? "";
+    modal = "relocate";
+  }
+
+  async function submitRelocate() {
+    const to = relocateTo.trim();
+    modal = null;
+    if ((await run("Relocating", () => svn.Relocate(wc, to), to)) === failed) return;
+    await reloadInfo();
+    notice = `This working copy now points at ${to}.`;
+  }
+
+  async function exportCopy(path = wc) {
+    const parent = await Dialogs.OpenFile({ Title: `Export ${baseName(path)} into`, CanChooseDirectories: true, CanChooseFiles: false, CanCreateDirectories: true, ButtonText: "Export here" });
+    if (typeof parent !== "string" || !parent) return;
+    const dest = join(parent, baseName(path));
+    if ((await run(`Exporting ${baseName(path)}`, () => svn.ExportLocal(path, dest))) !== failed) notice = `Exported to ${dest}, without svn's files.`;
+  }
+
+  function openImport(path: string) {
+    importState = { path, url: "", message: `Import ${baseName(path)}` };
+    modal = "import";
+  }
+
+  async function submitImport() {
+    const { path, url, message } = importState;
+    modal = null;
+    const rev = await run(`Importing ${baseName(path)}`, () => svn.Import(path, url.trim(), message.trim()), url.trim());
+    if (rev !== failed) notice = `Imported into ${url.trim()} as r${rev}. The folder itself is not a working copy; check it out to work on it.`;
+  }
+
+  function createRepo(path: string) {
+    ask(
+      "Create repository",
+      `Make an empty repository in\n\n  ${path}\n\nIt is reached as file:// on this computer only. For a team, a server such as VisualSVN Server is its usual home.`,
+      "Create",
+      async () => {
+        const url = await run("Creating the repository", () => SetupService.CreateRepository(path));
+        if (url === failed) return;
+        notice = `Repository created: ${url}`;
+        openCheckout(url);
+      },
+    );
+  }
+
+  async function createPatch(paths: string[]) {
+    const dest = await Dialogs.SaveFile({ Title: "Save patch", Filename: `${baseName(wc)}.patch`, ButtonText: "Save", CanCreateDirectories: true });
+    if (!dest) return;
+    if ((await run("Creating the patch", () => svn.CreatePatch(paths, dest))) !== failed) notice = `Patch saved to ${dest}`;
+  }
+
+  async function applyPatch() {
+    const file = await Dialogs.OpenFile({ Title: "Apply patch", CanChooseFiles: true, CanChooseDirectories: false, Filters: [{ DisplayName: "Patches", Pattern: "*.patch;*.diff" }], ButtonText: "Apply" });
+    if (typeof file !== "string" || !file) return;
+    const out = await run("Applying the patch", () => svn.ApplyPatch(wc, file));
+    if (out === failed) return;
+    await refresh();
+    textBox = { title: "Patch applied", text: out.trim() || "The patch changed nothing." };
+    modal = "text";
+  }
+
+  async function openBlame(path: string) {
+    pane = "blame";
+    blame = { target: path, lines: [], loading: true };
+    const r = await run(`Blaming ${baseName(path)}`, () => svn.Blame(path), info?.repositoryRoot);
+    if (blame.target !== path) return;
+    blame.loading = false;
+    if (r !== failed) blame.lines = r ?? [];
+  }
+
+  async function diffPrevious(path: string) {
+    const i = await run("Reading info", () => svn.Info(path));
+    if (i === failed) return;
+    pane = "diff";
+    await showRevisionDiff(path, i.lastCommit.revision);
+  }
+
+  function unversionIgnore(paths: string[]) {
+    ask("Unversion and add to ignore list", `Stop versioning these and add them to their folder's ignore list. The files stay on disk:\n\n${names(paths)}`, "Unversion", async () => {
+      if ((await run("Removing from svn", () => svn.Delete(paths, true))) === failed) return;
+      await ignore(paths);
+    });
   }
 
   function openProps(path: string, dir = isFolder(path)) {
@@ -985,10 +1115,29 @@
   // checkout goes, whatever the entry was.
   async function openStart(l: Launch) {
     const dir = l.isDir ? l.path : l.path.replace(/[\\/][^\\/]*$/, "");
+    // These do not need a working copy, and some are for a folder that is not one yet.
+    switch (l.action) {
+      case "checkout":
+        return openCheckout("", dir);
+      case "import":
+        return openImport(dir);
+      case "createrepo":
+        return createRepo(dir);
+      case "settings":
+        return openSettings();
+      case "help":
+        return openHelp();
+      case "about":
+        return openAbout();
+      case "upgrade":
+        if (!(await upgrade(dir))) return;
+        break;
+    }
     try {
       await svn.Info(dir);
     } catch (e) {
       if (failureCode(e) === "NOT_WORKING_COPY") {
+        if (l.action !== "open") notice = `${dir} is not a working copy, so there is nothing to ${l.action} here. Check one out into it?`;
         openCheckout("", dir);
         return;
       }
@@ -996,6 +1145,7 @@
     await openWC(dir);
     if (!wc) return;
     const inside = (p: string) => p === l.path || (p.startsWith(l.path) && /[\\/]/.test(p[l.path.length]));
+    const mine = entries.filter((e) => inside(e.path));
     switch (l.action) {
       case "update": {
         const rev = await run("Updating", () => svn.Update([l.path]));
@@ -1007,15 +1157,65 @@
       }
       case "commit":
         checked.clear();
-        entries.filter((e) => hasChanges(e) && inside(e.path)).forEach((e) => checked.add(e.path));
+        mine.filter(hasChanges).forEach((e) => checked.add(e.path));
         commitBox?.focus();
         break;
       case "log":
-        await openLog(l.path);
-        break;
+        return openLog(l.path);
       case "diff":
-        await showDiff(l.path);
+        return showDiff(l.path);
+      case "diffprev":
+        return diffPrevious(l.path);
+      case "blame":
+        return openBlame(l.path);
+      case "repos":
+        return openRepos(urlOf(l.path));
+      case "updaterev":
+        return showPane("history");
+      case "revert":
+        return discard([l.path]);
+      case "cleanup":
+        return cleanup();
+      case "resolve":
+        return openConflicts(conflicts.some((c) => c.path === l.path) ? l.path : "");
+      case "lock":
+        return openLock([l.path]);
+      case "unlock":
+        return unlock([l.path]);
+      case "branch":
+        return openBranch();
+      case "switch":
+        return openSwitch();
+      case "merge":
+        return openMerge();
+      case "export":
+        return exportCopy(l.path);
+      case "relocate":
+        return openRelocate();
+      case "add": {
+        const fresh = l.isDir ? mine.filter((e) => e.item === "unversioned").map((e) => e.path) : [l.path];
+        if (fresh.length) return add(fresh);
+        notice = "Nothing new to add here.";
         break;
+      }
+      case "ignore":
+        return ignore([l.path]);
+      case "unversion":
+        return unversionIgnore([l.path]);
+      case "rename":
+        return openMove(l.path);
+      case "delete":
+        return remove([l.path], false);
+      case "shelve":
+        return openShelve();
+      case "unshelve":
+        return openUnshelve();
+      case "createpatch":
+        return createPatch([l.path]);
+      case "applypatch":
+        return applyPatch();
+      case "properties":
+        return openProps(l.path, l.isDir);
     }
   }
 
@@ -1074,6 +1274,9 @@
         { label: "Checkout...", action: () => openCheckout(), disabled: !!busy || svnMissing },
         { label: "Browse repositories...", action: () => openRepos(), hint: "Ctrl+B", disabled: !!busy || svnMissing },
         { separator: true as const },
+        { label: "Import a folder...", action: async () => { const d = await Dialogs.OpenFile({ Title: "Import which folder", CanChooseDirectories: true, CanChooseFiles: false, ButtonText: "Import" }); if (typeof d === "string" && d) openImport(d); }, disabled: !!busy || svnMissing },
+        { label: "Create repository...", action: async () => { const d = await Dialogs.OpenFile({ Title: "Create the repository in", CanChooseDirectories: true, CanChooseFiles: false, CanCreateDirectories: true, ButtonText: "Create here" }); if (typeof d === "string" && d) createRepo(d); }, disabled: !!busy || svnMissing },
+        { separator: true as const },
         { label: "Quit", action: () => Application.Quit() },
       ],
     },
@@ -1086,6 +1289,13 @@
         { label: "Resolve conflicts...", action: () => openConflicts(), disabled: !conflicts.length },
         { label: "Properties...", action: () => openProps(wc, true), disabled: !wc },
         { label: "Properties of a file or folder...", action: pickProps, disabled: !wc },
+        { separator: true as const },
+        { label: "Clean up", action: cleanup, disabled: !wc || !!busy },
+        { label: "Relocate...", action: openRelocate, disabled: !wc || !!busy },
+        { label: "Upgrade working copy", action: async () => { if (await upgrade()) await refresh(); }, disabled: !wc || !!busy },
+        { label: "Export...", action: () => exportCopy(), disabled: !wc || !!busy },
+        { label: "Create patch...", action: () => createPatch([wc]), disabled: !wc || !!busy || !entries.some(hasChanges) },
+        { label: "Apply patch...", action: applyPatch, disabled: !wc || !!busy },
         { label: "Discard all changes...", action: () => discard([wc]), disabled: !wc || !!busy || !entries.some((e) => e.item !== "ignored") },
         { separator: true as const },
         { label: "Details...", action: openDetails, disabled: !wc },
@@ -1235,10 +1445,13 @@
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected={pane === "diff"} class:on={pane === "diff"} onclick={() => showPane("diff")}>Diff</button>
           <button role="tab" aria-selected={pane === "history"} class:on={pane === "history"} onclick={() => showPane("history")}>History</button>
+          {#if blame.target}<button role="tab" aria-selected={pane === "blame"} class:on={pane === "blame"} onclick={() => showPane("blame")}>Blame</button>{/if}
         </div>
         <div class="pane">
           {#if pane === "diff"}
             <DiffView title={diffTitle} text={diffText} loading={diffLoading} />
+          {:else if pane === "blame"}
+            <BlameView title={relative(wc, blame.target)} lines={blame.lines} loading={blame.loading} onrevision={(rev) => { pane = "diff"; showRevisionDiff(blame.target, rev); }} />
           {:else}
             <HistoryView
               entries={history.entries}
@@ -1564,6 +1777,38 @@
       <input bind:value={cl.name} placeholder="New changelist name" autofocus />
       <button class="primary" type="submit" disabled={!cl.name.trim() || cl.name.trim().startsWith("-")}>Move</button>
     </form>
+  </Modal>
+{:else if modal === "lock"}
+  <Modal title="Get lock" onclose={() => (modal = null)}>
+    <p class="muted">A lock tells everyone you are editing {lockState.paths.length === 1 ? baseName(lockState.paths[0]) : `these ${lockState.paths.length} files`}; nobody else can commit {lockState.paths.length === 1 ? "it" : "them"} until you commit or release it. Meant for files that cannot be merged, such as images.</p>
+    <!-- svelte-ignore a11y_autofocus -->
+    <label><span>Why (optional)</span><input bind:value={lockState.message} placeholder="Editing the level layout" autofocus /></label>
+    <label class="check"><input type="checkbox" bind:checked={lockState.steal} /> Take it over even if someone else holds it</label>
+    {#snippet footer()}
+      <button onclick={() => (modal = null)}>Cancel</button>
+      <button class="primary" disabled={!!busy} onclick={submitLock}>Get lock</button>
+    {/snippet}
+  </Modal>
+{:else if modal === "relocate"}
+  <Modal title="Relocate" onclose={() => (modal = null)}>
+    <p class="muted">For when the server moved, for example to a new address or https: points this working copy at the same repository under its new url. svn checks that it really is the same repository.</p>
+    <label><span>New url of this working copy</span><input bind:value={relocateTo} class="mono" /></label>
+    {#snippet footer()}
+      <button onclick={() => (modal = null)}>Cancel</button>
+      <button class="primary" disabled={!relocateTo.trim() || relocateTo.trim() === info?.url || !!busy} onclick={submitRelocate}>Relocate</button>
+    {/snippet}
+  </Modal>
+{:else if modal === "import"}
+  <Modal title="Import" onclose={() => (modal = null)}>
+    <p class="muted">Adds the contents of <code>{importState.path}</code> to the repository in one commit. The folder stays as it is, not a working copy.</p>
+    <!-- svelte-ignore a11y_autofocus -->
+    <label><span>Into (repository url)</span><input bind:value={importState.url} list="import-servers" class="mono" placeholder="https://svn.example.org/svn/Repo/trunk/new" autofocus /></label>
+    <datalist id="import-servers">{#each servers as s (s.url)}<option value={s.url}>{s.name}</option>{/each}</datalist>
+    <label><span>Commit message</span><input bind:value={importState.message} /></label>
+    {#snippet footer()}
+      <button onclick={() => (modal = null)}>Cancel</button>
+      <button class="primary" disabled={!importState.url.trim() || !importState.message.trim() || !!busy} onclick={submitImport}>Import</button>
+    {/snippet}
   </Modal>
 {:else if modal === "props"}
   <Modal title="Properties: {propsOf.label}" wide onclose={() => (modal = null)}>

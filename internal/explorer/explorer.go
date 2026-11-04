@@ -18,33 +18,86 @@ type Status struct {
 
 // Launch is what svnch was started to do: an Explorer entry passes --action and the clicked path.
 type Launch struct {
-	Action string `json:"action"` // open, update, commit, log or diff
+	Action string `json:"action"` // one of the menu actions, such as update, commit, log, blame or cleanup
 	Path   string `json:"path"`   // empty when svnch was started plainly
 	IsDir  bool   `json:"isDir"`
 }
 
-// item is one submenu entry; key orders them, since Explorer sorts static subcommands by key name.
-type item struct{ key, action, label string }
+// item is one menu entry; key orders them, since Explorer sorts static subcommands by key name, and sep draws a line
+// above it.
+type item struct {
+	key, action, label string
+	sep                bool
+}
 
+// topItems sit in Explorer's own menu, outside the submenu, as TortoiseSVN's most used commands do.
+func topItems(folder bool) []item {
+	items := []item{
+		{"svnch1update", "update", "SVN Update", false},
+		{"svnch2commit", "commit", "SVN Commit...", false},
+	}
+	if folder {
+		items = append(items, item{"svnch3checkout", "checkout", "SVN Checkout...", false})
+	}
+	return items
+}
+
+// folderItems follows TortoiseSVN's submenu. Explorer cannot ask svn whether the folder is a working copy before it
+// draws a static menu, so every entry is there, and svnch says so when one does not fit the folder.
 func folderItems() []item {
 	return []item{
-		{"1open", "open", "Open in svnch"},
-		{"2update", "update", "Update"},
-		{"3commit", "commit", "Commit..."},
-		{"4log", "log", "Show log"},
+		{"01open", "open", "Check for modifications", false},
+		{"02log", "log", "Show log", false},
+		{"03repos", "repos", "Repo-browser", false},
+		{"04updaterev", "updaterev", "Update to revision...", true},
+		{"05revert", "revert", "Revert...", false},
+		{"06cleanup", "cleanup", "Clean up", false},
+		{"07resolve", "resolve", "Resolve...", false},
+		{"08branch", "branch", "Branch/tag...", true},
+		{"09switch", "switch", "Switch...", false},
+		{"10merge", "merge", "Merge...", false},
+		{"11export", "export", "Export...", false},
+		{"12relocate", "relocate", "Relocate...", false},
+		{"13add", "add", "Add...", true},
+		{"14shelve", "shelve", "Shelve...", false},
+		{"15unshelve", "unshelve", "Unshelve...", false},
+		{"16createpatch", "createpatch", "Create patch...", false},
+		{"17applypatch", "applypatch", "Apply patch...", false},
+		{"18properties", "properties", "Properties", false},
+		{"19import", "import", "Import...", true},
+		{"20createrepo", "createrepo", "Create repository here", false},
+		{"21upgrade", "upgrade", "Upgrade working copy", false},
+		{"22settings", "settings", "Settings", true},
+		{"23help", "help", "Help", false},
+		{"24about", "about", "About", false},
 	}
 }
 
 func fileItems() []item {
 	return []item{
-		{"1diff", "diff", "Diff"},
-		{"2commit", "commit", "Commit..."},
-		{"3log", "log", "Show log"},
+		{"01diff", "diff", "Diff", false},
+		{"02diffprev", "diffprev", "Diff with previous version", false},
+		{"03log", "log", "Show log", false},
+		{"04blame", "blame", "Blame...", false},
+		{"05repos", "repos", "Repo-browser", false},
+		{"06updaterev", "updaterev", "Update to revision...", true},
+		{"07revert", "revert", "Revert...", false},
+		{"08resolve", "resolve", "Resolve...", false},
+		{"09lock", "lock", "Get lock...", true},
+		{"10unlock", "unlock", "Release lock", false},
+		{"11rename", "rename", "Rename...", true},
+		{"12delete", "delete", "Delete", false},
+		{"13add", "add", "Add", false},
+		{"14ignore", "ignore", "Add to ignore list", false},
+		{"15unversion", "unversion", "Unversion and add to ignore list", false},
+		{"16createpatch", "createpatch", "Create patch...", true},
+		{"17properties", "properties", "Properties", false},
+		{"18open", "open", "Check for modifications", true},
 	}
 }
 
 func known(action string) bool {
-	for _, it := range append(folderItems(), fileItems()...) {
+	for _, it := range append(append(folderItems(), fileItems()...), topItems(true)...) {
 		if it.action == action {
 			return true
 		}

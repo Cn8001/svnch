@@ -478,3 +478,34 @@ func TestIgnore_AppendsToTheFoldersList(t *testing.T) {
 		t.Errorf("ran %q, want second call %q", runner.ran, want)
 	}
 }
+
+func TestBlame_JoinsCommitsAndText(t *testing.T) {
+	// Arrange
+	blame := `<blame><target path="a.go"><entry line-number="1"><commit revision="9"><author>bob</author><date>2026-10-01T10:00:00Z</date></commit></entry></target></blame>`
+	runner := &scriptRunner{outs: map[string][]byte{"blame": []byte(blame), "cat": []byte("package a\n")}}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	lines, err := s.Blame(context.Background(), "/wc/a.go")
+
+	// Assert
+	if err != nil || len(lines) != 1 || lines[0].Text != "package a" || lines[0].Author != "bob" {
+		t.Errorf("got (%+v, %v)", lines, err)
+	}
+}
+
+func TestCreatePatch_WritesTheDiff(t *testing.T) {
+	// Arrange
+	dest := filepath.Join(t.TempDir(), "fix.patch")
+	runner := &scriptRunner{outs: map[string][]byte{"diff": []byte("Index: a.go\n")}}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	err := s.CreatePatch(context.Background(), []string{"/wc/a.go"}, dest)
+
+	// Assert
+	got, readErr := os.ReadFile(dest)
+	if err != nil || readErr != nil || string(got) != "Index: a.go\n" {
+		t.Errorf("patch = %q (%v, %v)", got, err, readErr)
+	}
+}

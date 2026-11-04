@@ -404,6 +404,98 @@ func (s *SVNService) Diff(ctx context.Context, req svn.DiffRequest) (string, err
 	return string(out), nil
 }
 
+// simple runs a command whose output svnch does not read, wrapping its error with what was being done.
+func (s *SVNService) simple(ctx context.Context, what, subcommand string, args []string, argErr error) error {
+	if _, err := s.run(ctx, "", subcommand, args, argErr); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	return nil
+}
+
+func (s *SVNService) Cleanup(ctx context.Context, wc string) error {
+	args, err := svn.CleanupArgs(wc)
+	return s.simple(ctx, "clean up "+wc, "cleanup", args, err)
+}
+
+func (s *SVNService) Upgrade(ctx context.Context, wc string) error {
+	args, err := svn.UpgradeArgs(wc)
+	return s.simple(ctx, "upgrade "+wc, "upgrade", args, err)
+}
+
+func (s *SVNService) Relocate(ctx context.Context, wc, to string) error {
+	args, err := svn.RelocateArgs(to, wc)
+	return s.simple(ctx, "relocate to "+to, "relocate", args, err)
+}
+
+func (s *SVNService) Lock(ctx context.Context, paths []string, message string, steal bool) error {
+	args, err := svn.LockArgs(message, steal, paths...)
+	return s.simple(ctx, "lock", "lock", args, err)
+}
+
+func (s *SVNService) Unlock(ctx context.Context, paths []string, force bool) error {
+	args, err := svn.UnlockArgs(force, paths...)
+	return s.simple(ctx, "release lock", "unlock", args, err)
+}
+
+func (s *SVNService) ExportLocal(ctx context.Context, path, dest string) error {
+	args, err := svn.LocalExportArgs(path, dest)
+	return s.simple(ctx, "export "+path, "export", args, err)
+}
+
+func (s *SVNService) Import(ctx context.Context, path, url, message string) (int64, error) {
+	args, err := svn.ImportArgs(path, url, message)
+	out, err := s.run(ctx, "", "import", args, err)
+	if err != nil {
+		return 0, fmt.Errorf("import %s: %w", path, err)
+	}
+	return svn.ParseCommit(out)
+}
+
+// CreatePatch writes the local changes under paths to dest as a unified diff, the same text Diff shows.
+func (s *SVNService) CreatePatch(ctx context.Context, paths []string, dest string) error {
+	if dest == "" || len(paths) == 0 {
+		return fmt.Errorf("create patch: %w", svn.ErrInvalidRequest)
+	}
+	var all []byte
+	for _, p := range paths {
+		args, err := svn.DiffArgs(svn.DiffRequest{Target: p})
+		out, err := s.run(ctx, "", "diff", args, err)
+		if err != nil {
+			return fmt.Errorf("create patch: %w", err)
+		}
+		all = append(all, out...)
+	}
+	if err := os.WriteFile(dest, all, 0o644); err != nil {
+		return fmt.Errorf("create patch: %w", err)
+	}
+	return nil
+}
+
+// ApplyPatch returns svn's report of what the patch touched, since a hunk that did not fit is only said there.
+func (s *SVNService) ApplyPatch(ctx context.Context, wc, patchFile string) (string, error) {
+	args, err := svn.PatchArgs(patchFile, wc)
+	out, err := s.run(ctx, "", "patch", args, err)
+	if err != nil {
+		return "", fmt.Errorf("apply patch: %w", err)
+	}
+	return string(out), nil
+}
+
+// Blame reads the committed text with cat and pairs it with blame, which knows the commits but not the text.
+func (s *SVNService) Blame(ctx context.Context, target string) ([]svn.BlameLine, error) {
+	args, err := svn.BlameArgs(target)
+	out, err := s.run(ctx, "", "blame", args, err)
+	if err != nil {
+		return nil, fmt.Errorf("blame %s: %w", target, err)
+	}
+	catArgs, err := svn.BlameTextArgs(target)
+	text, err := s.run(ctx, "", "cat", catArgs, err)
+	if err != nil {
+		return nil, fmt.Errorf("blame %s: %w", target, err)
+	}
+	return svn.ParseBlame(out, string(text))
+}
+
 func (s *SVNService) Log(ctx context.Context, req svn.LogRequest) ([]svn.LogEntry, error) {
 	args, err := svn.LogArgs(req)
 	out, err := s.run(ctx, "", "log", args, err)

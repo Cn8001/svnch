@@ -90,3 +90,25 @@ func TestParseLaunch_PlainStartHasNoPath(t *testing.T) {
 		t.Errorf("launch = %+v", l)
 	}
 }
+
+func TestMenus_KeysAreUniqueAndActionsKnown(t *testing.T) {
+	// Arrange
+	menus := map[string][]item{"folder": folderItems(), "file": fileItems(), "top": topItems(true)}
+
+	for name, items := range menus {
+		seen := map[string]bool{}
+		for _, it := range items {
+			// Act
+			dup := seen[it.key]
+			seen[it.key] = true
+
+			// Assert
+			if dup {
+				t.Errorf("%s menu: key %q twice", name, it.key)
+			}
+			if !known(it.action) || it.label == "" {
+				t.Errorf("%s menu: %+v", name, it)
+			}
+		}
+	}
+}

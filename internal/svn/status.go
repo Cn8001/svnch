@@ -13,6 +13,7 @@ type StatusEntry struct {
 	Copied         bool   `json:"copied"`
 	TreeConflicted bool   `json:"treeConflicted"`
 	Changelist     string `json:"changelist"` // empty when the item is in no changelist
+	Locked         bool   `json:"locked"`     // this working copy holds the item's lock
 }
 
 // StatusArgs lists ignored items too, for the collapsed Ignored group; svn stops at an ignored folder, so a build
@@ -33,6 +34,9 @@ type statusXMLEntry struct {
 		Revision       int64  `xml:"revision,attr"`
 		Copied         bool   `xml:"copied,attr"`
 		TreeConflicted bool   `xml:"tree-conflicted,attr"`
+		Lock           *struct {
+			Token string `xml:"token"`
+		} `xml:"lock"`
 	} `xml:"wc-status"`
 }
 
@@ -62,6 +66,7 @@ func ParseStatus(data []byte) ([]StatusEntry, error) {
 			Copied:         e.WC.Copied,
 			TreeConflicted: e.WC.TreeConflicted,
 			Changelist:     changelist,
+			Locked:         e.WC.Lock != nil,
 		})
 	}
 	for _, t := range doc.Targets {
