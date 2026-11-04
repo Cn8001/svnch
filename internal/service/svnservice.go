@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -225,6 +226,31 @@ func (s *SVNService) Revert(ctx context.Context, paths []string) error {
 		return fmt.Errorf("revert: %w", err)
 	}
 	return nil
+}
+
+// Discard throws away the local changes under paths. It reads the status again rather than trusting the caller, so
+// only what svn reports as never committed is deleted, and returns how many items it reverted and deleted.
+func (s *SVNService) Discard(ctx context.Context, wc string, paths []string) (svn.DiscardResult, error) {
+	var entries []svn.StatusEntry
+	for _, p := range paths {
+		e, err := s.Status(ctx, p)
+		if err != nil {
+			return svn.DiscardResult{}, fmt.Errorf("discard: %w", err)
+		}
+		entries = append(entries, e...)
+	}
+	plan := svn.PlanDiscard(wc, entries)
+	if len(plan.Revert) > 0 {
+		if err := s.Revert(ctx, plan.Revert); err != nil {
+			return svn.DiscardResult{}, fmt.Errorf("discard: %w", err)
+		}
+	}
+	for _, p := range plan.Remove {
+		if err := os.RemoveAll(p); err != nil {
+			return svn.DiscardResult{Reverted: len(plan.Revert)}, fmt.Errorf("discard, delete %s: %w", p, err)
+		}
+	}
+	return svn.DiscardResult{Reverted: len(plan.Revert), Removed: len(plan.Remove)}, nil
 }
 
 func (s *SVNService) Move(ctx context.Context, from, to string) error {

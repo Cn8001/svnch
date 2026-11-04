@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -366,5 +369,52 @@ func TestMakeDir_ReturnsRevision(t *testing.T) {
 	// Assert
 	if err != nil || rev != 7 || runner.subcommand != "mkdir" {
 		t.Errorf("got (%d, %v) from %s", rev, err, runner.subcommand)
+	}
+}
+
+// scriptRunner answers each svn subcommand with its own output, for methods that run more than one.
+type scriptRunner struct {
+	fakeRunner
+	outs map[string][]byte
+	ran  []string
+}
+
+func (r *scriptRunner) Run(_ context.Context, _, subcommand string, args ...string) ([]byte, error) {
+	r.ran = append(r.ran, subcommand+" "+strings.Join(args, " "))
+	return r.outs[subcommand], nil
+}
+
+func TestDiscard_RevertsAndDeletesOnlyWhatSvnCallsNew(t *testing.T) {
+	// Arrange
+	wc := t.TempDir()
+	newFile := filepath.Join(wc, "new.txt")
+	keep := filepath.Join(wc, "mod.go")
+	for _, f := range []string{newFile, keep} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status := fmt.Sprintf(`<status><target path=%q><entry path=%q><wc-status item="unversioned" props="none"></wc-status></entry><entry path=%q><wc-status item="modified" props="none"></wc-status></entry></target></status>`, wc, newFile, keep)
+	runner := &scriptRunner{outs: map[string][]byte{"status": []byte(status)}}
+	s := New(runner, runner, http.DefaultClient)
+
+	// Act
+	res, err := s.Discard(context.Background(), wc, []string{wc})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reverted != 1 || res.Removed != 1 {
+		t.Errorf("result = %+v", res)
+	}
+	if _, err := os.Stat(newFile); !os.IsNotExist(err) {
+		t.Errorf("new file still there: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("modified file was deleted: %v", err)
+	}
+	if len(runner.ran) != 2 || !strings.HasPrefix(runner.ran[1], "revert ") || !strings.HasSuffix(runner.ran[1], keep) {
+		t.Errorf("ran %q", runner.ran)
 	}
 }

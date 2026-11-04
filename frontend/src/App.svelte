@@ -583,9 +583,25 @@
     await refresh();
   }
 
-  function revert(paths: string[]) {
-    ask("Revert", `Throw away local changes in:\n\n${names(paths)}`, "Revert", async () => {
-      if ((await run("Reverting", () => svn.Revert(paths))) !== failed) notice = `Reverted ${paths.length} item(s).`;
+  function under(paths: string[]): StatusEntry[] {
+    return entries.filter((e) => e.item !== "ignored" && paths.some((p) => e.path === p || (e.path.startsWith(p) && /[\\/]/.test(e.path[p.length]))));
+  }
+
+  // discard shows what will happen before it does it: changed files go back, new ones are deleted for good. The Go
+  // side works it out again from svn's status, so this list is only for the person deciding.
+  function discard(paths: string[]) {
+    const all = under(paths);
+    const gone = all.filter((e) => e.item === "unversioned" || e.item === "added").map((e) => e.path);
+    const back = all.filter((e) => e.item !== "unversioned" && e.item !== "added").map((e) => e.path);
+    if (!gone.length && !back.length) return;
+    const parts = [];
+    if (back.length) parts.push(`Undo the local changes in:\n\n${names(back)}`);
+    if (gone.length) parts.push(`Delete these new files from disk, for good:\n\n${names(gone)}`);
+    ask("Discard changes", parts.join("\n\n"), "Discard", async () => {
+      const r = await run("Discarding changes", () => svn.Discard(wc, paths));
+      if (r !== failed) notice = `Discarded: ${r.reverted} reverted, ${r.removed} deleted.`;
+      checked.clear();
+      clearDiff();
       await refresh();
     });
   }
@@ -625,7 +641,7 @@
       { label: "Show diff", action: () => showDiff(path), disabled: many || !versioned },
       { separator: true },
       { label: "Add" + (unversioned.length > 1 ? ` (${unversioned.length})` : ""), action: () => add(unversioned), disabled: !unversioned.length },
-      { label: "Revert..." + n, action: () => revert(paths), disabled: !folder && !sel.some(isVersioned) },
+      { label: "Discard changes..." + n, action: () => discard(paths), disabled: !under(paths).length },
       { label: "Delete..." + n, action: () => remove(paths, false), disabled: unversioned.length > 0 },
       { label: "Remove from svn, keep file..." + n, action: () => remove(paths, true), disabled: unversioned.length > 0 },
       { label: "Rename / move...", action: () => openMove(path), disabled: many || !versioned },
@@ -960,6 +976,7 @@
         { label: "Refresh", action: refresh, hint: "F5", disabled: !wc || !!busy },
         { label: "Update", action: update, hint: "Ctrl+U", disabled: !wc || !!busy },
         { label: "Commit", action: commit, hint: "Ctrl+Enter", disabled: !canCommit },
+        { label: "Discard all changes...", action: () => discard([wc]), disabled: !wc || !!busy || !entries.some((e) => e.item !== "ignored") },
         { separator: true as const },
         { label: "Details...", action: openDetails, disabled: !wc },
         { label: "Show log", action: () => openLog(wc), disabled: !wc || !!busy },
